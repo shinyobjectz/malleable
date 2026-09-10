@@ -207,7 +207,8 @@ local function ask_fn(port)
 end
 
 -- The names a tool body always sees on its context, whatever the port carries.
-local RESERVED = { args = true, step = true, call = true, agent = true, depth = true, note = true }
+local RESERVED = { args = true, step = true, call = true, agent = true, depth = true,
+                   note = true, nested = true, acted = true }
 
 -- ------------------------------------------------------------------ validation
 
@@ -265,7 +266,8 @@ function turn.check(agent, port, opts)
     else
       local unknown = {}
       for k in pairs(opts) do
-        if not (OPT_NUMBERS[k] or k == "id" or k == "system") then unknown[#unknown + 1] = tostring(k) end
+        if not (OPT_NUMBERS[k] or k == "id" or k == "system" or k == "tracer"
+                or k == "run_span" or k == "notes") then unknown[#unknown + 1] = tostring(k) end
       end
       table.sort(unknown)
       for i = 1, #unknown do
@@ -287,6 +289,41 @@ function turn.check(agent, port, opts)
       if opts.system ~= nil and type(opts.system) ~= "string" then
         p[#p + 1] = "opts.system is a string, and arrived as " .. type(opts.system)
       end
+      -- A caller that started the run before the loop did: it holds the recorder, it
+      -- opened the run's own span, and it may already have made notes about the run.
+      -- All three are checked for shape here rather than trusted, because a half-built
+      -- recorder would fail in the middle of a run instead of before one.
+      if opts.tracer ~= nil then
+        if type(opts.tracer) ~= "table" then
+          p[#p + 1] = "opts.tracer is a recorder from turn.recorder, and arrived as " .. type(opts.tracer)
+        else
+          local missing = {}
+          for _, fn in ipairs({ "open_span", "close_span", "close_all" }) do
+            if type(opts.tracer[fn]) ~= "function" then missing[#missing + 1] = fn end
+          end
+          for i = 1, #missing do
+            p[#p + 1] = "opts.tracer has no " .. missing[i] .. ": it is a recorder from turn.recorder"
+          end
+        end
+      end
+      if opts.run_span ~= nil then
+        if type(opts.run_span) ~= "string" then
+          p[#p + 1] = "opts.run_span is a span id, and arrived as " .. type(opts.run_span)
+        elseif opts.tracer == nil then
+          p[#p + 1] = "opts.run_span names a span in a recorder, and opts.tracer is missing"
+        end
+      end
+      if opts.notes ~= nil then
+        if type(opts.notes) ~= "table" then
+          p[#p + 1] = "opts.notes is a list of strings, and arrived as " .. type(opts.notes)
+        else
+          for i = 1, #opts.notes do
+            if type(opts.notes[i]) ~= "string" then
+              p[#p + 1] = "opts.notes[" .. i .. "] is a string, and arrived as " .. type(opts.notes[i])
+            end
+          end
+        end
+      end
     end
   end
 
@@ -296,6 +333,131 @@ function turn.check(agent, port, opts)
 end
 
 -- ------------------------------------------------------------------- the run
+
+-- ------------------------------------------------------------------------ the trace
+--
+-- A run records its own tree -- a turn holds steps, a step holds a model call and the tool
+-- calls it asked for, a tool call may hold a question put to a human -- and the record is
+-- a FACT ABOUT THE RESULT, not a favour from a sink. `result.spans` is complete and
+-- nothing drops it; the same records also go out through the log port as they happen, for
+-- a host that wants a live view, and that half stays lossy exactly as `spec/port.md` says.
+--
+-- The recorder is HERE rather than in `src/trace.lua` because this file's own header says
+-- the only module it may require is the declaration surface, and a trace is not worth
+-- weakening that for. `trace.lua` renders what this produces -- to a wire format as a
+-- string, or to a tree for a person -- and knows nothing about a run. Which format, and
+-- whose, is that file's business: naming one here is what rule 1 forbids.
+--
+-- Rule 8 lives here too, by construction: every value written below is a name, a count, a
+-- duration or a term from a closed set. Never a prompt, a model's text, a file's contents,
+-- a tool's arguments or its output. A trace exporter's whole job is to send what it is
+-- given somewhere else.
+--
+-- Contract: spec/trace.md.
+local function recorder(clock, log, depth)
+  local r = { spans = {}, open = {}, n = 0 }
+
+  local function now()
+    if type(clock) == "table" and type(clock.now) == "function" then
+      local ok, t = pcall(clock.now)
+      if ok and type(t) == "number" then return math.floor(t * 1000) end
+    end
+    return 0
+  end
+
+  -- A span still open when the run ends is closed by the run and marked, because a span
+  -- that never closes is the one bug in a tracer that hides every other one.
+  function r.open_span(name, parent, attrs)
+    r.n = r.n + 1
+    local id = tostring(r.n)
+    local span = { id = id, parent = parent, name = name, at = now(), ms = 0,
+                   ok = true, attrs = attrs or {} }
+    r.spans[#r.spans + 1] = span
+    r.open[id] = span
+    if type(log) == "table" and type(log.write) == "function" then
+      pcall(log.write, "debug", "span.open", { span = id, parent = parent, name = name, depth = depth })
+    end
+    return id
+  end
+
+  function r.close_span(id, attrs, ok)
+    local span = r.open[id]
+    if not span then return end
+    r.open[id] = nil
+    span.ms = now() - span.at
+    if ok == false then span.ok = false end
+    for k, v in pairs(attrs or {}) do span.attrs[k] = v end
+    if type(log) == "table" and type(log.write) == "function" then
+      pcall(log.write, "debug", "span.close", { span = id, name = span.name, ms = span.ms, ok = span.ok })
+    end
+  end
+
+  -- A finished tree from somewhere else, hung under a span of this one.
+  --
+  -- Copies. The ids are re-stamped from this recorder's own counter and the parents
+  -- remapped with them, so two runs that both numbered their spans `"1"` cannot collide
+  -- and a child cannot name a parent it was never given. Times are taken verbatim: the
+  -- child read the same clock port, so its `at` is comparable with this run's without
+  -- being re-derived.
+  function r.adopt(spans, parent)
+    if type(spans) ~= "table" then return end
+    local mapped = {}
+    for i = 1, #spans do
+      local from = spans[i]
+      if type(from) == "table" and type(from.name) == "string" then
+        r.n = r.n + 1
+        local id = tostring(r.n)
+        mapped[tostring(from.id)] = id
+        local attrs = {}
+        for k, v in pairs(type(from.attrs) == "table" and from.attrs or {}) do attrs[k] = v end
+        r.spans[#r.spans + 1] = {
+          id = id,
+          parent = (from.parent ~= nil and mapped[tostring(from.parent)]) or parent,
+          name = from.name,
+          at = tonumber(from.at) or 0,
+          ms = tonumber(from.ms) or 0,
+          ok = from.ok ~= false,
+          attrs = attrs,
+        }
+      end
+    end
+  end
+
+  -- Sweep what is still open, and mark it. `from` bounds the sweep to spans opened at or
+  -- after that id, so a caller that opened a span BEFORE handing the recorder over --
+  -- `agent.tick` around a beat, a delegating turn around a child run -- still holds its
+  -- own and closes it itself. Without the bound, the first run to finish would mark every
+  -- span above it unclosed, which is the tracer reporting its own bookkeeping as a fault
+  -- in the run.
+  function r.close_all(from)
+    local floor = tonumber(from) or 0
+    for id, span in pairs(r.open) do
+      if (tonumber(id) or 0) >= floor then
+        span.ms = now() - span.at
+        span.ok = false
+        span.attrs["malleable.unclosed"] = true
+        r.open[id] = nil
+      end
+    end
+  end
+
+  return r
+end
+
+--- A recorder, for a caller that starts a run and wants what happens BEFORE the loop on
+--- the same tree — a skill catalogued, a server connected, a beat firing.
+---
+--- Handed out rather than kept private, and handed out from HERE rather than from
+--- `src/trace.lua`, for the reason this file's header gives: the only module it may
+--- require is the declaration surface, and a recorder in another file would make it
+--- require that one too. `turn.run` still makes its own when nobody hands it one, so a
+--- host that calls the loop directly is unchanged and is still handed a whole tree.
+---
+--- What a caller gets is three functions and a list. It is not a capability a tool body
+--- may hold: rule 8 is enforced by `trace.allowed` over the attributes, and a body that
+--- could open a span could write a name the vocabulary never agreed to. `agent.lua` holds
+--- one; nothing reachable from a tool does.
+turn.recorder = recorder
 
 function turn.run(agent, prompt, port, opts)
   local ok, problems = turn.check(agent, port, opts)
@@ -331,6 +493,30 @@ function turn.run(agent, prompt, port, opts)
   local function note(s)
     result.notes[#result.notes + 1] = s
   end
+
+  -- Notes the caller already made about this run, in front of the ones the run makes. A
+  -- server that was never reached is a fact about the whole run and not about the step
+  -- that noticed, and arriving here rather than being spliced on afterwards is what makes
+  -- `malleable.notes` count them.
+  for i = 1, #(opts.notes or {}) do result.notes[i] = opts.notes[i] end
+
+  -- The recorder is the caller's when the caller started the run before the loop did.
+  -- `agent.run` does: it catalogues skills and connects servers first, and those are part
+  -- of invoking this agent rather than a separate tree beside it. The span the loop hangs
+  -- its steps under is then the caller's too, and the loop still CLOSES it, because what
+  -- a run amounts to — how it stopped, how many steps, how many calls — is only known
+  -- here (spec/trace.md, "The spans").
+  local tracer = opts.tracer or recorder(port.clock, port.log, depth)
+  result.spans = tracer.spans
+  local run_span = opts.run_span or tracer.open_span(
+    "invoke_agent " .. tostring(agent.name or "agent"), nil, {
+      ["gen_ai.operation.name"] = "invoke_agent",
+      ["gen_ai.agent.name"] = tostring(agent.name or "agent"),
+      ["gen_ai.request.model"] = tostring(agent.model or ""),
+      ["malleable.budget"] = budget,
+      ["malleable.depth"] = depth,
+    })
+  local step_span = nil
 
   -- A hook may say NO. It may not say "yes, but different".
   --
@@ -407,6 +593,14 @@ function turn.run(agent, prompt, port, opts)
     result.stop = stop
     result.reason = reason
     result.err = err
+    if step_span then tracer.close_span(step_span); step_span = nil end
+    tracer.close_span(run_span, {
+      ["malleable.stop"] = stop,
+      ["malleable.steps"] = result.steps,
+      ["malleable.calls"] = #result.calls,
+      ["malleable.notes"] = #result.notes,
+    }, stop ~= "error")
+    tracer.close_all(run_span)
     fire("stop", {
       stop = stop, reason = reason, steps = result.steps,
       answer = result.answer, depth = depth,
@@ -427,6 +621,29 @@ function turn.run(agent, prompt, port, opts)
   end
   table.sort(clash)
 
+  -- Where a tool body leaves a FINISHED tree it ran: `agent.delegate` puts the child
+  -- run's spans here, and the call's own span adopts them (mar-gogg).
+  --
+  -- A list, not a tracer. Rule 4 withholds `model` and `ask` from a body because those
+  -- are AUTHORITY -- a body holding them could approve itself or spend the budget. A
+  -- recorder is authority of the same kind: it reaches across the whole run, and a body
+  -- with one could open a span anywhere in the tree or leave one open forever. A list of
+  -- spans that have already closed is not: it is data, this file re-stamps every id and
+  -- every parent before adopting it, and the worst a body can do with it is describe
+  -- itself inaccurately -- which a body can already do by returning any string it likes.
+  local nested = nil
+
+  -- What a call DID, as terms, for its own span. The shell tool parses its own command
+  -- line and leaves the terms here; the command line itself never moves, which is rule 8
+  -- getting stronger rather than being relaxed for it (spec/command.md).
+  --
+  -- This file does not hold the closed set and does not check against it: rule 1 lets it
+  -- require the declaration surface and nothing else, and eleven terms copied here would
+  -- be a fourth place for the vocabulary to drift. The gate is `trace.allowed`, in the
+  -- file that owns what an attribute may say, and the rule 8 test walks every span of the
+  -- whole suite through it.
+  local acted = nil
+
   local function context(args, step, call_id)
     local c = {}
     for k, v in pairs(passthrough) do c[k] = v end
@@ -436,6 +653,11 @@ function turn.run(agent, prompt, port, opts)
     c.agent = agent.name
     c.depth = depth
     c.note = function (s) note(text_of(s)) end
+    -- Fresh per call, so one call cannot read or extend what another left.
+    nested = {}
+    acted = {}
+    c.nested = nested
+    c.acted = acted
     return c
   end
 
@@ -458,7 +680,68 @@ function turn.run(agent, prompt, port, opts)
   -- One tool call, start to finish. Returns the record; the caller turns it into a
   -- message. `blocked` is a sentence when an earlier call in this reply stopped the
   -- run, or when this call is past the per-step limit.
+  -- The tool span is a WRAPPER around dispatch rather than a line inside it, because the
+  -- body has a dozen return paths -- refused, malformed, no such tool, raised, stopped --
+  -- and a span opened in one place and closed in twelve is a span that leaks in one of
+  -- them. `tool_span` is the parent a gate question hangs off.
+  local tool_span = nil
+  local dispatch_body
+
   local function dispatch(call, step, call_id, blocked)
+    local name = type(call) == "table" and call.tool or nil
+    local named = (type(name) == "string" and name ~= "") and name or "(unnamed)"
+    local span = tracer.open_span("execute_tool " .. named, step_span, {
+      ["gen_ai.operation.name"] = "execute_tool",
+      ["gen_ai.tool.name"] = named,
+      ["gen_ai.tool.call.id"] = tostring(call_id),
+    })
+    local outer, outer_nested, outer_acted = tool_span, nested, acted
+    tool_span = span
+    nested, acted = nil, nil
+    local ok, record = pcall(dispatch_body, call, step, call_id, blocked)
+    -- Whatever the body ran, under the call that ran it. Done before the branch below,
+    -- so a delegate whose child failed and whose own body then raised still hands back
+    -- what the child did -- which is the trace somebody will want.
+    local left = nested
+    if type(left) == "table" then
+      for i = 1, #left do
+        if type(left[i]) == "table" then tracer.adopt(left[i].spans, span) end
+      end
+    end
+    local did = acted
+    tool_span, nested, acted = outer, outer_nested, outer_acted
+    if not ok then
+      tracer.close_span(span, { ["malleable.refused_by"] = "error" }, false)
+      error(record, 0)
+    end
+    local attrs = {}
+    if record.refused then
+      attrs["malleable.refused_by"] = record.vetoed and "hook" or "gate"
+    end
+    -- Sorted and joined, so the same call reads the same twice and two runs compare.
+    -- `unplaced` is what the body could not name: the number that says how much of this
+    -- call the vocabulary is blind to, and the one that has to go DOWN.
+    if type(did) == "table" then
+      local terms, seen, unplaced = {}, {}, 0
+      for i = 1, #did do
+        local e = did[i]
+        if type(e) == "table" then
+          for j = 1, #(e.acts or {}) do
+            local t = e.acts[j]
+            if type(t) == "string" and not seen[t] then seen[t] = true; terms[#terms + 1] = t end
+          end
+          if type(e.unplaced) == "number" then unplaced = unplaced + e.unplaced end
+        end
+      end
+      table.sort(terms)
+      if #terms > 0 then attrs["malleable.act"] = table.concat(terms, ", ") end
+      if unplaced > 0 then attrs["malleable.unplaced"] = unplaced end
+    end
+    tracer.close_span(span, attrs, record.ok == true)
+    return record
+  end
+
+  function dispatch_body(call, step, call_id, blocked)
     local name = type(call) == "table" and call.tool or nil
     local rec = {
       -- An empty string is not a name: a call that named nothing must not be recorded
@@ -506,6 +789,9 @@ function turn.run(agent, prompt, port, opts)
 
     if tool.ask then
       rec.asked = true
+      local gate_span = tracer.open_span("malleable.gate " .. tostring(name), tool_span, {
+        ["gen_ai.tool.name"] = tostring(name),
+      })
       local asked, n, a, b = call_counted(ask, {
         agent = agent.name, tool = name, about = tool.about,
         args = copy(args), step = step, call = call_id,
@@ -524,6 +810,16 @@ function turn.run(agent, prompt, port, opts)
         decision = "deny"
         why = why or complaint
       end
+      -- How often an agent asks, and what it is told, is the number nobody else's
+      -- telemetry has, and it says more about whether an agent is safe to leave running
+      -- than any token count. The WHY is a term from a closed set, never the sentence:
+      -- a gate's reason is a person's words about this call (rule 8).
+      tracer.close_span(gate_span, {
+        ["malleable.gate.answer"] = (complaint and "absent")
+          or (decision == "allow" and "allowed")
+          or (decision == "stop" and "stopped")
+          or "refused",
+      }, complaint == nil)
       if decision == "stop" then
         rec.refused = true
         rec.output = "the run was stopped at the approval gate"
@@ -571,6 +867,8 @@ function turn.run(agent, prompt, port, opts)
 
     result.steps = result.steps + 1
     local step = result.steps
+    if step_span then tracer.close_span(step_span) end
+    step_span = tracer.open_span("malleable.step", run_span, { ["malleable.steps"] = step })
     fire("step", { step = step, budget = budget, depth = depth })
 
     local request = {
@@ -579,7 +877,29 @@ function turn.run(agent, prompt, port, opts)
       messages = wire(),
       tools = spec.schema(agent),  -- fresh, so a port that edits it cannot poison step two
     }
+    -- `gen_ai.provider.name` is the declaration's own prefix and nothing else. A model id
+    -- with no prefix means the declaration named no provider, and the attribute is then
+    -- absent rather than guessed: which provider a bare id belongs to is the host's
+    -- question, and answering it here would be rule 1 broken by a default.
+    local chat_attrs = {
+      ["gen_ai.operation.name"] = "chat",
+      ["gen_ai.request.model"] = tostring(agent.model or ""),
+    }
+    local provider = tostring(agent.model or ""):match("^([%w_%-%.]+):")
+    if provider then chat_attrs["gen_ai.provider.name"] = provider end
+    local chat_span = tracer.open_span("chat " .. tostring(agent.model or "model"), step_span, chat_attrs)
     local reached, n, reply, err = call_counted(model, request)
+    do
+      local attrs = {}
+      if type(reply) == "table" and type(reply.usage) == "table" then
+        if type(reply.usage.input) == "number" then attrs["gen_ai.usage.input_tokens"] = reply.usage.input end
+        if type(reply.usage.output) == "number" then attrs["gen_ai.usage.output_tokens"] = reply.usage.output end
+      end
+      if type(reply) == "table" and type(reply.calls) == "table" then
+        attrs["malleable.calls"] = #reply.calls
+      end
+      tracer.close_span(chat_span, attrs, reached and reply ~= nil)
+    end
 
     if not reached then
       local message = "the model call raised: " .. text_of(reply)

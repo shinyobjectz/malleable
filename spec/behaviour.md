@@ -1,0 +1,399 @@
+# behaviour — a feature file is what the agent does, and the test that it does it
+
+`src/behaviour.lua`. Contract, not implementation. No code exists yet; the module is
+written to this document, and this document is amended before the code diverges from it.
+
+## What it is for
+
+An agent declaration says what an agent *is*: its name, its model, its tools, when it must
+ask. Nothing in it says what the agent *does*, and that is the half a person actually
+argues about, reviews, and gets wrong.
+
+So a declaration comes in a pair:
+
+    triage.lua        what the agent is        — the declaration, in Lua
+    triage.feature    what it does             — the behaviour, in Gherkin
+
+and the second one is executable. Not a document that describes the first and rots beside
+it: the runner builds the world out of the `Given` lines, runs the declaration against it,
+and judges the `Then` lines on what came back. A feature that passes is documentation that
+was true this morning.
+
+This is the whole bet, and it is worth stating plainly because it is the reason this
+subsystem exists rather than a `test/` directory: **the behaviour of an agent is written
+in natural language by the person who wanted it, and executed without translation.** A
+harness that can only be tested in Lua can only be reviewed by someone who reads Lua, and
+the person who knows whether the agent should have asked before filing the verdict is very
+often not that person.
+
+## Vocabulary
+
+`feature`, `scenario`, `pickle`, `expression` and `vocabulary` are defined in
+`spec/gherkin.md`, along with the recorded divergence on **step**. Two more here:
+
+* a **phase** is one of the three parts of a scenario — given, when, then. Not a *stage*,
+  not a *section*. The three phase names are lower case in this tree's own prose and
+  capitalised only when quoting a file.
+* the **world** is what `agent.world` already means: the six ports and the three seam
+  ports, in memory, deterministic. A `Given` line does not "set up", "arrange", "mock" or
+  "stub" anything. It states one fact about the world, and the world is built out of the
+  facts stated.
+
+## Where it sits
+
+    a feature file  ->  gherkin.pickle(text)         -- spec/gherkin.md, no harness in it
+                    ->  behaviour.run(decl, pickles) -- here
+                    ->  a report                     -- here
+
+`behaviour` requires `gherkin` and `double`, and nothing else in this tree. It reaches the
+declaration through the public surface only — `agent.run`, `agent.tick`, `agent.check` —
+so it cannot see anything a host could not see, and a feature therefore cannot test an
+internal that a host is not allowed to depend on.
+
+## The three phases, and the one rule that makes them safe
+
+**A `Given` line may only write the world. A `Then` line may only read the result.**
+
+That sentence is the whole design. It is what separates this from a scripting language
+that happens to be shaped like English, and it is enforced structurally rather than by
+convention, in the way `spec/interpret-marks.md` makes a regex unrepresentable rather than
+discouraged:
+
+* a given body is called with a context that has a **`world`** and no `result`;
+* a then body is called with a context that has a **`result`** and a `world` that is a
+  read-only proxy — the same proxy `cli.sandbox` uses — so a write raises by name;
+* neither context carries a port, a model, a file handle or a clock. A step body cannot
+  reach the world except through the world table it was handed.
+
+The consequence is worth spelling out: **a scenario cannot cause the behaviour it claims to
+observe.** A `Then` line that quietly wrote a file, or called a tool to check that the tool
+works, would be a test that passes because it tested itself, and this is the failure mode
+that makes a green suite worthless. There is no way to write one here.
+
+`When` is the seam between them, and there is exactly one per scenario. Two are refused by
+name at load, and none is refused at load: a scenario with `Given` and `Then` and no `When`
+is a scenario nobody finished, and it is more useful to say so than to run it.
+
+## The vocabulary
+
+Thirty-three expressions, closed, versioned. `behaviour.VOCABULARY = 1`, bumped when an
+expression changes meaning. A step that matches none of them is **undefined**, and an
+undefined step is reported with the expression a person would have to write to define it —
+never dropped, never guessed at, and never a failure (see below).
+
+Each expression is assigned to exactly one phase, and the phase decides when it runs; the
+Gherkin keyword on the line does not (`spec/gherkin.md`, "The pickle").
+
+**`{word}` is a name in the system and is written bare; `{string}` is text a person typed
+and is written in quotes.** A tool, a server, a beat and a stop reason are names —
+`Then it calls verdict` — and a path, a command line, a prompt and an answer are text.
+The rule is worth having because the alternative is a reader guessing whether the quotes
+were part of the name.
+
+### given — the world
+
+| | builds |
+| --- | --- |
+| `the file {string} contains:` + doc string | `fs` |
+| `the file {string} is missing` | `fs` |
+| `the command {string} answers {int} and:` + doc string | `sh` |
+| `the human approves {word}` | `ask` |
+| `the human refuses {word}` | `ask` |
+| `the clock reads {string}` | `clock` |
+| `the model calls {word} with {value}` | `model`, appended in order |
+| `the model answers {string}` | `model`, appended in order |
+| `the workspace keeps a skill {string}:` + doc string | `skills` |
+| `{word} last ran on {string}` | `ledger` |
+| `the server {word} offers {word}, which answers {value}` | `mcp` |
+| `the budget is {int}` | the run's options |
+
+The model's script is *ordered*, and the order is the order the lines appear in the file.
+This is the one piece of state a given line accumulates rather than sets, and it is the
+reason a scenario reads like a transcript:
+
+    Given the model calls read with {"path": "src/turn.lua"}
+    And the model calls verdict with {"summary": "the loop is small"}
+    And the model answers "I read it and filed an approval."
+
+### when — the run
+
+| | does |
+| --- | --- |
+| `the agent is asked {string}` | `agent.run(prompt, world)` |
+| `the clock strikes {string}` | `agent.tick` — what the beat is owed at that time |
+| `the declaration is loaded` | `agent.check` only; nothing runs |
+
+`the declaration is loaded` is how a feature states something about the declaration itself
+rather than about a run — that a tool with no `about` is refused, that a budget of zero is
+refused. It is the one `When` that reaches no port at all.
+
+### then — the result
+
+| | reads |
+| --- | --- |
+| `it stops with {word}` | `result.stop`, one of the four |
+| `it answers {string}` | `result.answer`, exactly |
+| `the answer says {string}` | `result.answer`, containing |
+| `it calls {word}` | `result.calls` |
+| `it calls {word} with {value}` | `result.calls`, arguments compared as decoded values |
+| `it calls {word} {int} time(s)` | `result.calls` |
+| `it never calls {word}` | `result.calls` |
+| `the call to {word} is refused` | `result.calls`, the refusal flag |
+| `the human is asked about {word}` | the gate's record |
+| `it takes {int} step(s)` | `result.steps` |
+| `it takes at most {int} step(s)` | `result.steps` |
+| `the file {string} holds:` + doc string | the world's `fs`, after |
+| `nothing is written` | the world's `fs`, after |
+| `it notes {string}` | `result.notes`, containing |
+| `the declaration is sound` | `agent.check` answered true |
+| `the declaration is refused because {string}` | `agent.check`'s reasons, containing |
+
+### then — the calls that did not go through
+
+| | reads |
+| --- | --- |
+| `the call to {word} fails` | it was called, was not refused, and did not work |
+| `it calls {word} before {word}` | and in that order |
+
+### then — what a command line amounted to
+
+| | reads |
+| --- | --- |
+| `it runs a command that {word}` | a shell call whose command line did this |
+| `it runs no command that {word}` | and no shell call did |
+
+`{word}` is one of the eleven terms in `spec/command.md`, and a line naming anything else
+**fails with the list**, rather than passing vacuously because nothing matched.
+
+These two are the only place in the vocabulary that reaches inside a tool's arguments, and
+they are the reason a shell-first agent is sayable at all. `it calls shell` says a tool was
+used; `it never runs a command that publishes` says the thing a person actually cares
+about, and it is a line somebody could have written **before** the agent existed — which is
+the test of whether a vocabulary is behavioural or is a log format with Gherkin punctuation.
+
+The observer writes them, and stops writing the command line when it does: a Then line
+carrying `{"command":"curl -H 'Authorization: Bearer …'"}` would put in a file people read
+exactly what rule 8 keeps out of a span. The command stays in the **Given** half, which is
+the world the scenario replays and cannot be reproduced without.
+
+These two are what came out of **retiring** the eight telemetry expressions that once stood
+here — `the trace shows {string}`, `the span {string} says {word} is {value}` and the six
+beside them. Rewriting the two scenarios in `example/reviewer.feature` that used them
+showed that six of the eight were already covered by `it calls`, `it never calls`, `the
+call to … is refused` and `it takes {int} steps`, and that two things a person genuinely
+wanted to state had no word at all: *a call that was allowed and did not work*, and *the
+order it did things in*. "It reads before it judges" is the whole point of a reviewer, and
+the vocabulary could not say it.
+
+That is the discipline working rather than a tidy-up. A gap is filled with a **behavioural**
+word; the harness's own nouns — `span`, `trace`, `log` — are not available, because a
+scenario written in them describes the harness rather than the agent (DESIGN.md, "The
+direction"; `spec/observe.md`).
+
+**On `says`, `notes` and `because`, which compare text.** This repository rules that no
+reader may key off a phrase, an exact word or a character position (mar-4o07, 2026-09-09).
+That rule binds the readers that derive meaning from a person's prose — the map, the
+interpretive layer, Build. It does not bind an assertion in a test, and the distinction is
+not a loophole: a `Then` line is a person stating, in this file, the exact words they
+expect back. There is no inference to get wrong. A test that says *the answer says
+"blocked"* is not reading language; it is comparing a string to a string that a human
+wrote three lines above it, on purpose, in this file.
+
+## agent.step — the workspace's own vocabulary
+
+The thirty-six cover the harness. They cannot cover a domain, and a feature about a
+triage agent wants to say `Given the queue holds a ticket from "ops"`. So a declaration may
+add steps, curried exactly like a tool, because a reader who understands one understands
+the other:
+
+    agent.step "the queue holds a ticket from {string}" {
+      given = function (c) c.world.queue[#c.world.queue + 1] = { from = c.args[1] } end,
+    }
+
+    agent.step "the ticket from {string} is closed" {
+      then_ = function (c) return c.world.queue[c.args[1]].closed == true end,
+    }
+
+Four things this shape commits to:
+
+1. **A step declares its phase by which body it gives**, `given` or `then_`, and it may
+   give only one. This is why the phase is structural rather than a field: a body in the
+   `given` slot receives a given context, and there is no arrangement of fields that gives
+   a then body a writable world. (`then` is a Lua keyword; `then_` is the cost of the
+   language and is spelled that way in the error message too.)
+2. **A step has no `when` slot.** The three `When` expressions are the harness's and are
+   closed. A workspace that wants a different way to start a run is asking for a different
+   harness, and a `when` a workspace could write is the door through which a scenario
+   starts causing what it observes.
+3. **`c.args` is positional**, in the order the parameters appear in the expression, typed
+   as `spec/gherkin.md` says. `c.doc` is the doc string if the line had one, `c.rows` the
+   data table.
+4. **A then body answers `true`, or `false` and a sentence.** Not an assert, not an error.
+   A failed expectation is a result the report prints, and a raised error in a step body is
+   a *broken step*, reported apart from a failing one — the two mean different things and a
+   report that conflated them would send a person to the wrong file.
+
+A declared step whose expression collides with a built-in is refused at declaration, naming
+both. The workspace does not get to redefine what `it calls {word}` means.
+
+## Undefined is not failed
+
+A scenario whose steps are all defined and all pass is **passed**. One that fails an
+expectation is **failed**. One that contains a step matching nothing is **undefined**, and
+its later steps are **skipped**.
+
+Keeping those apart is the point of having them:
+
+* *undefined* means this behaviour is stated and not yet modelled. It is a to-do with a
+  sentence attached, and the report prints the `agent.step` stub a person would paste.
+* *failed* means this behaviour is modelled and the agent does not do it.
+
+A run that is all-undefined exits non-zero and says so, so a feature nobody wired up cannot
+sit in a suite looking green.
+
+## The report
+
+`behaviour.run` answers a table, never printing:
+
+    { passed = 4, failed = 1, undefined = 2, skipped = 3, broken = 0,
+      scenarios = { { name = "...", line = 12, outcome = "failed",
+                      steps = { { text = "...", line = 14, outcome = "failed",
+                                  why = "it answered \"approved\", not \"blocked\"" } } } } }
+
+`behaviour.report(t)` renders it: one line per scenario, the failing line quoted with its
+number and the sentence beside it, and a tally. The renderer is pure and the caller decides
+where the text goes, because this tree has no idea what stdout is.
+
+## Checking a feature without running it
+
+`behaviour.check(decl, pickles)` answers the problems a run would hit, as sentences, and
+runs nothing. It is what the `--check` flag and the editor call, and it finds:
+
+* a step matching no expression, with the stub to define it;
+* two expressions matching one step;
+* a scenario with no `When`, or with two;
+* phases out of order;
+* a step naming a tool the declaration does not declare — `Then it calls verdict` when
+  there is no `verdict` — which is the single most common way a feature goes stale, because
+  renaming a tool cannot break a file the compiler never reads;
+* `Given the human approves {word}` naming a tool that does not have `ask = true`, which is
+  a scenario asserting a gate that will never open;
+* a declared step never used by any scenario in the feature.
+
+Every one of those is a sentence with a line number. None of them requires a model, a port
+or a clock, which is what makes this the thing an editor can run on every keystroke.
+
+## The runner
+
+    lua bin/malleable.lua --verify triage.lua triage.feature
+    lua bin/malleable.lua --check  triage.lua triage.feature
+
+`--verify` loads the declaration in the sandbox exactly as a run does — rule 2 holds, and a
+feature file cannot cause a declaration to execute — pickles the feature, runs every
+scenario against the doubles, renders the report and exits non-zero on a failure, a break
+or an all-undefined file. It reaches no network, no disk beyond the two files it was given,
+no subprocess and no clock.
+
+With no feature named, it looks for `<declaration basename>.feature` beside the
+declaration, which is the convention this pair is meant to make ordinary.
+
+## Evaluating: the same file, against a real model
+
+`--verify` runs a feature against the doubles: one sample, deterministic, pass or fail,
+and it belongs in CI. `--eval` runs **the same file** against a real model through a port
+the host supplies, k times per scenario, and answers a **rate**.
+
+    lua bin/malleable.lua --verify triage.lua              -- deterministic, no world
+    ta-harness --eval triage.lua --samples 20              -- a real model, a rate
+
+This is the standard this subsystem exists to make possible, and it is worth stating as a
+claim rather than a feature: **an agent's effectiveness is the rate at which it does what
+its own documentation says it does.** The yardstick was written in prose by the person who
+wanted the behaviour, before the agent existed, and it is the same text that documents it.
+Nothing was written to be an eval, so nothing was written to be passed.
+
+### No model judges anything
+
+The `Then` lines are the same deterministic assertions in both modes. This repository does
+not run checking standards and does not judge an output with a model (ruled 2026-09-07),
+and an eval that scored a run by asking a model whether it went well would be exactly that.
+What is nondeterministic here is the system under test; the scoring is a string comparison
+and a count, and it would give the same answer if a person did it by hand.
+
+### What changes between the two modes, and what cannot
+
+The world half of the given phase — `fs`, `sh`, `clock`, `ask`, `skills`, `ledger`, `mcp`,
+the budget — **applies in both**. An eval that let the agent touch a real disk would not be
+repeatable and would not be safe, and a real model driving real tools against real files is
+not an eval, it is production.
+
+The two given expressions that script the model — `the model calls {word} with {value}` and
+`the model answers {string}` — **are dropped in eval**, because a real model is answering.
+Which has a consequence a person has to be told about rather than discover:
+
+* a scenario whose expectations only make sense against a scripted model is **not
+  evaluable**, and the runner says so with the line that made it so, rather than scoring it;
+* the assertions that survive contact with a real model are the ones about *outcome* —
+  `it stops with`, `the file {string} holds:`, `nothing is written`, `the call to {word} is
+  refused`, `the human is asked about {word}` — and the ones about an exact call
+  sequence generally do not. That is not a defect in the vocabulary. It is the feature file
+  telling a person which of their expectations were about the agent and which were about
+  the transcript they imagined.
+
+Evaluability is computed, not declared, so nobody has to remember a tag. A scenario may opt
+out with `@verify-only`, and that is the only tag this runner reads.
+
+### The report
+
+Per scenario: samples, passes, the rate, and every failing sample kept whole — its result
+and its trace (`spec/trace.md`), which is what makes a failure diagnosable instead of
+merely counted. Per feature: the rates, and the scenarios that could not be evaluated.
+
+A rate is reported as a fraction of the samples that ran and never rounded up to a
+sentence. There is no threshold in this tree, no pass mark and no grade: what rate is good
+enough is a decision about a product, and a harness that picked one for you would be making
+it silently.
+
+### The trace is the join
+
+Every scenario opens a `malleable.scenario {name}` span and everything the run did hangs
+under it, so a trace in a collector is attributable to the sentence in the feature file
+that asked for it. That is the whole reason the two specs were written in one epic: without
+the feature there is nothing to attribute a trace to, and without the trace a failing rate
+says a thing is broken without saying where.
+
+## What it must NOT do
+
+* Write a declaration, or any part of one, from a feature. Gherkin states behaviour and
+  validates it; what the agent *is* stays in Lua, where a tool body belongs. A generator
+  that turned prose into a declaration would put a model in the loop of running a test, and
+  the test would then be as reliable as the model.
+* Reach a real port under `--verify`. There is no door to one. `--eval` reaches exactly
+  one — the model — and reaches it through the host, which is the only thing that has a
+  model to give; the filesystem, the shell, the clock and the gate stay doubles in both
+  modes, and no flag opens them.
+* Let a `Then` line mutate anything.
+* Guess at an undefined step, fuzzily match one, or drop one.
+* Print. The module answers with a table and a renderer.
+
+## The tests that would prove it
+
+* each of the thirty-six expressions, once, matching and building or reading what it says;
+* a given context has no `result`; a then context's world raises on a write, by name;
+* a declared step in the `given` slot cannot see a result, and one in `then_` cannot write;
+* a declared step colliding with a built-in is refused, naming both;
+* a scenario with two `When` lines is refused at load; with none, refused at load;
+* a Given after a Then is refused, naming both lines;
+* an undefined step yields `undefined` and skips what follows, and the report carries the
+  stub;
+* a step body that raises is `broken`, not `failed`, and the report keeps them apart;
+* an all-undefined feature exits non-zero;
+* `check` finds each of its seven problems, with a line number, and touches no port;
+* `example/reviewer.feature` drives `example/reviewer.lua` end to end and passes — the
+  worked example, stated in prose, executed;
+* an eval drops the two model-script given lines and keeps the other ten;
+* a scenario that is not evaluable is reported as such, naming the line, and is not scored;
+* a rate over a scripted model that always does the right thing is 1, and over one that
+  never does is 0, with every failing sample's result and trace kept;
+* `@verify-only` is skipped by an eval and run by a verify;
+* everything above under `lua` and under `luajit`.

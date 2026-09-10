@@ -225,8 +225,12 @@ function schedule.tick(a, p, opts)
       row.ok, row.result = ok, v
       if not ok then row.error = tostring(v) end
     else
+      -- The beat itself is the fifth argument, and `turn.run` -- the default runner --
+      -- ignores it. A runner that wants to say WHICH beat it is running needs the name,
+      -- and there was no other way to know: `agent.tick` puts a `malleable.beat` span
+      -- around each run with it.
       local runner = type(opts.run) == "function" and opts.run or turn.run
-      local ok, v = pcall(runner, a, beat.runs, p, opts.run_opts)
+      local ok, v = pcall(runner, a, beat.runs, p, opts.run_opts, beat)
       row.ok, row.result = ok, v
       if not ok then row.error = tostring(v) end
     end

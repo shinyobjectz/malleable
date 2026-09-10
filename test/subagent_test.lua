@@ -125,6 +125,55 @@ function T.the_child_runs_its_own_tools()
   assert(#result.calls == 1)
 end
 
+-- The child's own tree, under the call that started it.
+--
+-- Before this, a delegated run's trace was simply LOST: the child recorded a whole tree
+-- on its own result and `subagent` dropped it, so the one agent whose behaviour cannot be
+-- reconstructed by reading the code was the one with no trace at all (mar-gogg).
+function T.the_childs_tree_hangs_under_the_call_that_started_it()
+  local child = world { { tool = "echo", args = { line = "hi" } }, "said it" }
+  local result = parent_run(
+    { agents = { reviewer = agent("reviewer") }, world = child },
+    { { tool = "delegate", args = { agent = "reviewer", prompt = "say hi" } }, "done" })
+
+  local index = {}
+  for i = 1, #result.spans do index[result.spans[i].id] = result.spans[i] end
+
+  local call, nested
+  for i = 1, #result.spans do
+    local sp = result.spans[i]
+    if sp.name == "execute_tool delegate" then call = sp end
+    if sp.name:sub(1, 12) == "invoke_agent" and sp.parent ~= nil then nested = sp end
+  end
+  assert(call, "no span for the delegate call")
+  assert(nested, "the child ran and the parent's tree says nothing about it")
+  assert(index[nested.parent] == call, "the child is not under the call that started it")
+  assert(nested.attrs["malleable.depth"] == 1, tostring(nested.attrs["malleable.depth"]))
+
+  -- The whole child tree, not just its root: the tool it ran is in the parent's tree too,
+  -- under the child, and the parent's own `result.calls` still holds only `delegate`.
+  local echoed
+  for i = 1, #result.spans do
+    if result.spans[i].name == "execute_tool echo" then echoed = result.spans[i] end
+  end
+  assert(echoed, "the child's own tool call did not come back")
+  assert(index[echoed.parent], "the child's tool call names a parent that is not in this tree")
+
+  -- Ids are RE-STAMPED. Two runs each numbered their spans from 1, and a tree where two
+  -- spans share an id is a tree a collector cannot draw.
+  local seen_ids = {}
+  for i = 1, #result.spans do
+    local id = result.spans[i].id
+    assert(not seen_ids[id], "two spans share the id " .. tostring(id))
+    seen_ids[id] = true
+  end
+  -- And no span names a parent this tree does not hold.
+  for i = 1, #result.spans do
+    local up = result.spans[i].parent
+    assert(up == nil or index[up], "a span names a parent that is not here: " .. tostring(up))
+  end
+end
+
 function T.the_childs_transcript_comes_back_whole()
   local child = world { { tool = "echo", args = { line = "hi" } }, "said it" }
   local result, seen = parent_run(

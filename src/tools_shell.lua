@@ -105,14 +105,20 @@ end
 -- ---------------------------------------------------------------------------
 -- options
 
+-- `acts` is a function (command line) -> { acts = {...}, unplaced = n }: what this tool's
+-- OWN input did, in terms, so the trace can say it without the command line itself ever
+-- leaving this file. It is handed IN rather than required, because this file reaches into
+-- no sibling and that is asserted; `agent.shell` wires `src/command.lua` in, and a host
+-- calling `shell.tool` directly may wire a reader of its own -- the bounded escape hatch
+-- `spec/command.md` allows, where a host may answer more precisely and never differently.
 local OPTION_TYPE = {
   about = "string", ask = "boolean", cwd = "string",
   timeout_ms = "number", timeout_max = "number",
   stdout_cap = "number", stderr_cap = "number", port_max = "number",
-  env = "table", stdin = "string",
+  env = "table", stdin = "string", acts = "function",
 }
 
-local OPTION_LIST = "about, ask, cwd, timeout_ms, timeout_max, stdout_cap, stderr_cap, port_max, env, stdin"
+local OPTION_LIST = "about, ask, cwd, timeout_ms, timeout_max, stdout_cap, stderr_cap, port_max, env, stdin, acts"
 
 -- Ordered, so the same wrong table always fails on the same key.
 local NUMBERS = {
@@ -604,6 +610,17 @@ function shell.tool(t)
     -- The model reads the rendered block; a host that wants the structure takes the
     -- second value.
     run = function (c)
+      -- Read BEFORE the command runs, so a command that hangs or is killed still says
+      -- what it was going to do. The line goes no further than this call: what is left
+      -- for the trace is terms and a count, and `c.acted` is a plain list the loop reads.
+      local said = type(c.args) == "table" and c.args.command or nil
+      if type(o.acts) == "function" and type(said) == "string" and said ~= ""
+         and type(c.acted) == "table" then
+        local ok, read = pcall(o.acts, said)
+        if ok and type(read) == "table" and type(read.acts) == "table" then
+          c.acted[#c.acted + 1] = { acts = read.acts, unplaced = read.unplaced }
+        end
+      end
       local r = shell.run(c, o)
       return r.text, r
     end,

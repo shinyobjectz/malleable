@@ -50,9 +50,15 @@ local double     = part "double"
 local cli        = part "cli"
 local tools_fs   = part "tools_fs"
 local tools_sh   = part "tools_shell"
+local command    = part "command"
 local work       = part "work"
 local subagent   = part "subagent"
 local session    = part "session"
+local gherkin    = part "gherkin"
+local behaviour  = part "behaviour"
+local observe    = part "observe"
+local change     = part "change"
+local trace      = part "trace"
 local provider   = part "provider"
 local config     = part "config"
 local compaction = part "compaction"
@@ -98,6 +104,15 @@ end
 -- Builds one prefix table bound to one agent table. The module's own `agent` is the
 -- first of these; `agent.new()` mints another, so two agents can be declared in one
 -- process without either seeing the other's tools.
+-- A feature arrives as text. It is pickled once, here, so both verbs read the same
+-- flat list and a refusal says the same sentence either way.
+local function behaviour_pickles(feature)
+  if type(feature) ~= "string" then
+    error("a feature is the text of a .feature file, and arrived as " .. type(feature), 3)
+  end
+  return gherkin.pickle(feature)
+end
+
 local function prefix()
   local a = spec.new()
   local s = {}
@@ -172,6 +187,12 @@ local function prefix()
       fail("agent.shell: `root` is the workspace root, as a non-empty string")
     end
 
+    -- What a command line DID, in terms, wired in here because `tools_shell.lua` reaches
+    -- into no sibling and this prefix is where composition belongs. A declaration that
+    -- names its own reader keeps it (spec/command.md, the bounded escape hatch).
+    rest = rest or {}
+    if rest.acts == nil then rest.acts = command.acts end
+
     local decl = tools_sh.tool(rest)
     local body = decl.run
     decl.run = function (c)
@@ -236,7 +257,31 @@ local function prefix()
     -- one a person typed is: same skills, same servers, same composition.
     local o = {}
     if opts then for k, v in pairs(opts) do o[k] = v end end
-    if o.run == nil then o.run = function (d, prompt, port, ropts) return s.run(d, prompt, port, ropts) end end
+    if o.run == nil then
+      o.run = function (d, prompt, port, ropts, beat)
+        -- A recorder per beat, not per tick: `result.spans` on each row is then that
+        -- beat's own tree and nothing else's, which is what a caller reading one row
+        -- expects. The beat's span is the root and the run hangs under it, so a trace in
+        -- a collector says which scheduled thing produced it -- the same join
+        -- `malleable.scenario` makes for a feature file.
+        local tracer = turn.recorder(port and port.clock, port and port.log, 0)
+        local name = type(beat) == "table" and beat.name or nil
+        local span = tracer.open_span("malleable.beat " .. tostring(name or "beat"), nil, {})
+        local ro = {}
+        if ropts then for k, v in pairs(ropts) do ro[k] = v end end
+        ro.tracer, ro.parent = tracer, span
+        local ok, result = pcall(s.run, d, prompt, port, ro)
+        if not ok then
+          tracer.close_span(span, {}, false)
+          tracer.close_all()
+          error(result, 0)
+        end
+        tracer.close_span(span, {
+          ["malleable.stop"] = type(result) == "table" and result.stop or "error",
+        }, type(result) == "table" and result.stop ~= "error")
+        return result
+      end
+    end
     return schedule.tick(decl, p, o)
   end
 
@@ -270,28 +315,191 @@ local function prefix()
     -- be composed before the first model call, and a server's tools must be in the
     -- schema before the model is shown one.
     local problems = {}
+
+    -- The run's own tree starts HERE, not in the loop, because catalogueing skills and
+    -- connecting servers is part of invoking this agent and not a separate tree beside
+    -- it. Before this, the recorder was built inside `turn.run` and died with it, so
+    -- everything above was over before anything could record it — one cause behind four
+    -- missing span kinds rather than four separate omissions (mar-qghy).
+    --
+    -- A run started through some OTHER prefix -- `agent.tick` firing a beat, a delegate
+    -- calling back in -- hands its own recorder and its own parent down, so a tick is one
+    -- tree rather than one per beat.
+    local o = {}
+    if opts then for k, v in pairs(opts) do o[k] = v end end
+    opts = o
+    local tracer = opts.tracer
+    local parent = opts.parent
+    opts.parent = nil
+    if not tracer then
+      tracer = turn.recorder(p and p.clock, p and p.log, opts.depth or 0)
+      opts.tracer = tracer
+    end
+    if not opts.run_span then
+      opts.run_span = tracer.open_span(
+        "invoke_agent " .. tostring(decl and decl.name or "agent"), parent, {
+          ["gen_ai.operation.name"] = "invoke_agent",
+          ["gen_ai.agent.name"] = tostring(decl and decl.name or "agent"),
+          ["gen_ai.request.model"] = tostring(decl and decl.model or ""),
+          ["malleable.budget"] = opts.budget or (decl and decl.budget) or 0,
+          ["malleable.depth"] = opts.depth or 0,
+        })
+    end
+
     pcall(skills.ensure, decl, p)
     if type(decl) == "table" and type(decl.server_order) == "table" and #decl.server_order > 0 then
-      local _, said = mcp.connect(decl, p, opts)
+      -- One span per server reached, timed around the call that reaches it -- a server
+      -- that hangs is the failure this span exists for, and a single span around the
+      -- whole loop would hide which one hung.
+      local watch = function (name)
+        local span = tracer.open_span("malleable.server " .. tostring(name), opts.run_span, {})
+        return function (reached, tools)
+          tracer.close_span(span, { ["malleable.tools"] = tools or 0 }, reached == true)
+        end
+      end
+      local _, said = mcp.connect(decl, p, { watch = watch })
       for i = 1, #(said or {}) do problems[#problems + 1] = said[i] end
     end
+
+    -- One span for the catalogue and the briefing composed from it. A skill BODY is read
+    -- by the skill tool during a step, and is already an `execute_tool skill` span there;
+    -- what has never been visible is how many procedures this run was briefed on at all,
+    -- which is the number that says whether the agent had anything to follow.
+    local skill_span = tracer.open_span("malleable.skill", opts.run_span, {})
     local ok_system, system, clashes = pcall(skills.system, decl, p)
+    local catalogued = 0
+    do
+      local ok_count, have = pcall(skills.catalogue, decl, p)
+      if ok_count and type(have) == "table" then catalogued = #have end
+    end
+    tracer.close_span(skill_span, { ["malleable.skills"] = catalogued }, ok_system)
     if ok_system and system then
-      opts = opts and (function () local o = {} for k, v in pairs(opts) do o[k] = v end return o end)() or {}
       if opts.system == nil then opts.system = system end
       for i = 1, #(clashes or {}) do
         problems[#problems + 1] = "the workspace and this declaration both hold a skill called "
           .. string.format("%q", clashes[i]) .. "; the declared one is the one that will be read"
       end
     end
-    local result = turn.run(decl, prompt, p, opts)
-    -- On the run's own notes, where a person reading the run will find them, and in
-    -- front of the notes the run made: a server that was never reached is a fact about
-    -- the whole run and not about the step that noticed.
-    if #problems > 0 and type(result) == "table" and type(result.notes) == "table" then
-      for i = #problems, 1, -1 do table.insert(result.notes, 1, problems[i]) end
+
+    -- The problems go in as notes the run STARTS with rather than being spliced on after
+    -- it: a server that was never reached is a fact about the whole run and not about the
+    -- step that noticed, and going in this way is what makes `malleable.notes` count them.
+    if #problems > 0 then opts.notes = problems end
+    return turn.run(decl, prompt, p, opts)
+  end
+
+  -- ------------------------------------------------------------------ the embed door
+  --
+  -- A whole world, with NOTHING from the host: a working shell over a filesystem in
+  -- memory, a frozen clock, a gate, a log, and a model that says plainly it is not there.
+  -- `bin/malleable.lua` is twenty lines and is the only file in this tree that touches
+  -- the real world; not one module names `io` or `os`. So the harness has always been
+  -- embeddable in anything with a Lua in it -- what was missing was a world to hand it
+  -- that did not come from outside, and this is that call.
+  --
+  -- It is `sandbox` and not `world` on purpose. `agent.world` is the TEST double and its
+  -- defaults are a test's: nothing runs that was not scripted, because "nothing is
+  -- scripted for that" is the most useful sentence a double ever says. An embedder wants
+  -- the opposite default, and two names is how both get to be honest.
+  --
+  -- The gate DEFAULTS TO REFUSING. A sandbox is where an agent is allowed to try things,
+  -- which is exactly where a gate that said yes by default would be worst; a host that
+  -- wants otherwise says `ask = true` and has said it in writing.
+  function s.sandbox(cfg)
+    if cfg ~= nil and type(cfg) ~= "table" then
+      fail("agent.sandbox takes a table of options or nothing, got %s", type(cfg))
     end
-    return result
+    local o = {}
+    if cfg then for k, v in pairs(cfg) do o[k] = v end end
+    o.shell = o.shell ~= false
+    if o.clock == nil then o.clock = { at = 0 } end
+    if o.ask == nil then o.ask = false end
+    return double.world(o)
+  end
+
+  -- ------------------------------------------------------------ the behaviour half
+  --
+  -- A declaration says what the agent IS. A feature file says what it DOES, in the
+  -- language somebody would have used to ask for it, and these two verbs run it.
+  -- `spec/behaviour.md` is the contract; the built-in vocabulary covers the harness
+  -- itself, so the common case needs no `agent.step` at all.
+
+  -- The declaration as `behaviour` sees it: three verbs and four facts, and nothing
+  -- that would let a feature reach past the surface a host has.
+  local function drivers()
+    local d = {
+      run = function (prompt, world, opts) return s.run(prompt, world, opts) end,
+      check = function (world, opts)
+        local ok, reasons = s.check(world, opts)
+        return ok, reasons
+      end,
+      steps = {}, tools = {}, asks = {}, beats = {},
+    }
+    for i = 1, #a.order do
+      local name = a.order[i]
+      d.tools[name] = true
+      if a.tools[name] and a.tools[name].ask then d.asks[name] = true end
+    end
+    for i = 1, #a.step_order do d.steps[#d.steps + 1] = a.steps[a.step_order[i]] end
+    if #a.beat_order > 0 then
+      for i = 1, #a.beat_order do d.beats[a.beat_order[i]] = true end
+      d.tick = function (world, opts)
+        local ran = s.tick(world, opts)
+        -- A tick answers a list of what fired; a scenario asks about ONE run, so the
+        -- last one is the one its Then lines are about. A tick that fired nothing
+        -- answers nothing, and the Then lines say so rather than reading a stale run.
+        return type(ran) == "table" and ran[#ran] and ran[#ran].result or nil
+      end
+      d.mark = function (name, at)
+        local beat = a.beats[name]
+        if not beat then return nil end
+        return schedule.key(a, beat), { at = at, grain = schedule.grain_key(beat, at) }
+      end
+    end
+    return d
+  end
+
+  -- The built-in vocabulary, as a list. `docs/STEPS.md` is rendered from this.
+  function s.steps() return behaviour.steps() end
+
+  -- Run a feature against this declaration on the doubles. Answers the report table;
+  -- `behaviour.report` renders it, because this tree has no idea what stdout is.
+  function s.verify(feature, opts)
+    local pickles, why = behaviour_pickles(feature)
+    if not pickles then return nil, why end
+    return behaviour.run(pickles, drivers(), opts)
+  end
+
+  -- The SAME feature file, against a real model, k times per scenario, answering a rate.
+  --
+  -- The world stays doubled and only the model is real: a real model driving real tools
+  -- against real files is not an eval, it is production. The two given lines that script
+  -- a model are dropped, and a scenario whose expectations only made sense against a
+  -- scripted one is reported not evaluable rather than scored.
+  --
+  -- No model judges anything. The Then lines are the same deterministic comparisons in
+  -- both modes; what is nondeterministic here is the system under test.
+  ---@param feature string
+  ---@param model table   the host's model port -- the one thing that is real
+  ---@param opts table|nil  { samples = 20 }
+  function s.evaluate(feature, model, opts)
+    local pickles, why = behaviour_pickles(feature)
+    if not pickles then return nil, why end
+    if type(model) ~= "table" and type(model) ~= "function" then
+      return nil, "an eval needs the host's model port; the rest of the world stays doubled"
+    end
+    local o = {}
+    if opts then for k, v in pairs(opts) do o[k] = v end end
+    o.eval = { model = model, samples = (opts and opts.samples) or 20 }
+    return behaviour.run(pickles, drivers(), o)
+  end
+
+  -- The problems a run would hit, as sentences, reaching no port at all. This is what an
+  -- editor runs on every keystroke and what `--check` prints.
+  function s.check_feature(feature)
+    local pickles, why = behaviour_pickles(feature)
+    if not pickles then return { why } end
+    return behaviour.check(pickles, drivers())
   end
 
   -- ------------------------------------------------------- the rest of the tree
@@ -314,6 +522,11 @@ local function prefix()
   s.port       = capport
   s.provider   = provider
   s.session    = session
+  s.behaviour  = behaviour
+  s.observe    = observe        -- a run read back as a scenario, and the repertoire kept
+  s.change     = change         -- what a declaration may alter about itself, and what it may not
+  s.trace      = trace
+  s.gherkin    = gherkin
   s.subagent   = subagent
   s.tools_fs   = tools_fs
   s.tools_sh   = tools_sh

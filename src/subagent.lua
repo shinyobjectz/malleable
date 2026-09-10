@@ -782,6 +782,12 @@ function subagent.run(ctx, req)
     calls   = r.calls,
     notes   = notes,
     err     = r.err,
+    -- What the child DID, as its own tree. Carried back rather than dropped, so the
+    -- parent's turn can hang it under the `execute_tool` span that started it: a
+    -- delegating agent is exactly the one whose behaviour cannot be reconstructed by
+    -- reading the code (mar-gogg). It travels as data and this file does nothing with
+    -- it -- no clock, no ids, no re-parenting, all of which belong to whoever adopts it.
+    spans   = r.spans,
     pool    = ledger.snapshot(),
   }
   if type(r.notes) == "table" then
@@ -974,6 +980,14 @@ function subagent.tool(cfg)
       end
 
       local result = subagent.run(ctx, req)
+
+      -- Left where the turn loop looks for it. `ctx.nested` is a plain list the loop
+      -- hands each call; the loop re-stamps every id and parent before adopting them,
+      -- so nothing here has to know what the parent's tree looks like.
+      local inbox = peek(ctx, "nested")
+      if type(inbox) == "table" and type(result.spans) == "table" then
+        inbox[#inbox + 1] = { spans = result.spans }
+      end
 
       if held.watch then
         local ok, e = pcall(held.watch, result)

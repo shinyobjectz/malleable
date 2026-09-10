@@ -128,4 +128,29 @@ if is_main() then
   for _, tool in ipairs(refused) do print("  refused: " .. tool) end
   print("answer: " .. tostring(result.answer))
   print("REVIEW.md:\n" .. tostring(world.fs.files["REVIEW.md"]))
+
+  -- ---------------------------------------------------------------- the behaviour half
+  --
+  -- The same agent, stated in the language somebody would have used to ask for it, and
+  -- executed. `reviewer.feature` builds its own world out of its Given lines, so nothing
+  -- above is reused: five scenarios, five worlds, no network, no disk, no clock.
+  --
+  -- This is the library door. The runner's door is the same thing on a declaration
+  -- written for the sandbox:  lua bin/malleable.lua --verify <declaration>.lua
+  local file = io.open(here .. "/reviewer.feature", "rb")
+  if not file then
+    print("\n(no reviewer.feature beside this file)")
+    return
+  end
+  local text = file:read("*a")
+  file:close()
+
+  print("\n---- reviewer.feature ----")
+  local report, why = agent.verify(text)
+  if not report then
+    print("the feature cannot be read: " .. tostring(why))
+    os.exit(1)
+  end
+  io.write(agent.behaviour.report(report))
+  if not report.ok then os.exit(1) end
 end

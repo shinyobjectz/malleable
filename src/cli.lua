@@ -29,6 +29,9 @@ local double   = need_module("double", true)
 -- no server never notices they are missing.
 local skills   = need_module("skills")
 local mcp      = need_module("mcp")
+local schedule = need_module("schedule")
+local gherkin  = need_module("gherkin")
+local behaviour = need_module("behaviour")
 
 local cli = {}
 
@@ -158,6 +161,10 @@ local LONG = {
   ["--reply"]          = { field = "reply",          kind = "list" },
   ["--script"]         = { field = "script",         kind = "string" },
   ["--check"]          = { field = "check",          kind = "flag" },
+  ["--verify"]         = { field = "verify",         kind = "flag" },
+  ["--steps"]          = { field = "show_steps",     kind = "flag" },
+  ["--heading"]        = { field = "heading",        kind = "flag" },
+  ["--feature"]        = { field = "feature",        kind = "string" },
   ["--tools"]          = { field = "show_tools",     kind = "flag" },
   ["--session"]        = { field = "session",        kind = "string" },
   ["--json"]           = { field = "json",           kind = "flag" },
@@ -183,6 +190,7 @@ local KNOWN = {
   calls_per_step = true, max_depth = true, model = true, root = true,
   timeout = true, trust = true, allow = true, deny = true, yes = true,
   no = true, dry_run = true, reply = true, script = true, check = true,
+  verify = true, feature = true, show_steps = true,
   show_tools = true, session = true, json = true, show_lines = true,
   quiet = true, verbose = true, width = true, colour = true, help = true,
   version = true, path = true, prompt_source = true, argv = true, words = true,
@@ -195,7 +203,7 @@ local function defaults()
     model = nil, root = ".", timeout = nil, trust = nil,
     allow = {}, deny = {}, yes = false, no = false,
     dry_run = false, reply = {}, script = nil,
-    check = false, show_tools = false, session = nil, json = false,
+    check = false, verify = false, feature = nil, show_steps = false, show_tools = false, session = nil, json = false,
     show_lines = 12, quiet = false, verbose = 0, width = nil, colour = nil,
     help = false, version = false,
     path = nil, prompt_source = "none", words = {}, argv = {},
@@ -315,7 +323,9 @@ function cli.parse(argv)
     return nil, which .. " is a scripted answer, and needs --dry-run"
   end
 
-  if positional[1] == nil then
+  -- `--steps` asks what the words are, which is a question about the harness and not
+  -- about any declaration. Like `--help` and `--version`, it needs no file.
+  if positional[1] == nil and not o.show_steps then
     return nil, "no declaration file given"
   end
   o.path = positional[1]
@@ -377,6 +387,79 @@ end
 -- `tool` and `on` take both the curried form the surface reads in
 -- (`agent.tool "read" { ... }`) and the two-argument form a host that builds a
 -- declaration in code finds easier. Nothing here runs a body: rule 2.
+-- The declaration as `behaviour` sees it: three verbs and four facts, and nothing that
+-- would let a feature reach past the surface a host has.
+--
+-- ONE definition, here, for the same reason `cli.surface` is one: `agent.verify` and
+-- `--verify` are two doors onto one thing, and two builders would be two vocabularies
+-- that drift.
+-- The built-in vocabulary, rendered. One source -- `src/behaviour.lua` holds the table
+-- and nothing else does -- and three renderings: this, `agent.steps()`, and the stub
+-- `behaviour.check` prints when a line matches nothing.
+function cli.steps_text(opts)
+  local steps = behaviour.steps()
+  local out = {}
+  -- The heading, when this is being written to a file rather than read at a terminal.
+  -- It lives here rather than at the top of `docs/STEPS.md`, because a generated file
+  -- with a hand-written header is a file the next regeneration silently eats -- which is
+  -- exactly what happened to it once.
+  if opts ~= nil and opts.heading then
+    out[#out + 1] = "# The built-in step vocabulary\n\n"
+    out[#out + 1] = "GENERATED from `src/behaviour.lua` by "
+      .. "`lua bin/malleable.lua --steps --heading > docs/STEPS.md`. Never hand-edited: "
+      .. "an expression is added in one place, and this is a rendering of it.\n\n"
+    out[#out + 1] = "```\n"
+  end
+  out[#out + 1] = fmt("The built-in vocabulary: %d expressions, version %d.\n",
+                      #steps, behaviour.VOCABULARY)
+  local phases = { { "given", "the world" }, { "when", "the run" }, { "then", "the result" } }
+  for p = 1, #phases do
+    out[#out + 1] = fmt("\n%s -- %s\n", phases[p][1], phases[p][2])
+    for i = 1, #steps do
+      if steps[i].phase == phases[p][1] then
+        out[#out + 1] = fmt("  %-58s %s%s\n", steps[i].expr, steps[i].about,
+                            steps[i].scripts_model and "  (dropped in an eval)" or "")
+      end
+    end
+  end
+  if opts ~= nil and opts.heading then out[#out + 1] = "```\n" end
+  return table.concat(out)
+end
+
+function cli.drivers(a, run, opts)
+  local d = {
+    run = run,
+    check = function (world, o) return turn.check(a, world, o) end,
+    steps = {}, tools = {}, asks = {}, beats = {},
+  }
+  for i = 1, #a.order do
+    d.tools[a.order[i]] = true
+    if a.tools[a.order[i]] and a.tools[a.order[i]].ask then d.asks[a.order[i]] = true end
+  end
+  for i = 1, #a.step_order do d.steps[#d.steps + 1] = a.steps[a.step_order[i]] end
+  if #a.beat_order > 0 and schedule then
+    for i = 1, #a.beat_order do d.beats[a.beat_order[i]] = true end
+    d.tick = function (world, o)
+      local wants = {}
+      if o then for k, v in pairs(o) do wants[k] = v end end
+      wants.run = wants.run or function (decl, prompt, port, ropts)
+        return run(prompt, port, ropts)
+      end
+      local ran = schedule.tick(a, world, wants)
+      -- A tick answers a list of what fired; a scenario asks about ONE run, so the last
+      -- is the one its Then lines are about. A tick that fired nothing answers nothing,
+      -- and the Then lines say so rather than reading a stale run.
+      return type(ran) == "table" and ran[#ran] and ran[#ran].result or nil
+    end
+    d.mark = function (name, at)
+      local beat = a.beats[name]
+      if not beat then return nil end
+      return schedule.key(a, beat), { at = at, grain = schedule.grain_key(beat, at) }
+    end
+  end
+  return d
+end
+
 function cli.surface(a)
   local surface = {
     name   = function (v) spec.set_name(a, v) end,
@@ -404,6 +487,13 @@ function cli.surface(a)
     uses   = function (n, d)
       if d == nil then return function (x) return spec.add_server(a, n, x) end end
       return spec.add_server(a, n, d)
+    end,
+    -- A step of a feature file. On the surface rather than beside it, so a declaration
+    -- loaded in the sandbox can declare one: a feature is not a thing only a host gets.
+    step   = function (e, d)
+      if behaviour == nil then error("agent.step: this build has no feature reader", 2) end
+      if d == nil then return function (x) return behaviour.declare(spec, a, e, x) end end
+      return behaviour.declare(spec, a, e, d)
     end,
     trust  = function (v)
       if type(v) ~= "string" or not TRUSTS[v] then
@@ -1303,6 +1393,10 @@ pi [options] <declaration.lua> [prompt words ...]
       --check             load, validate, report, run nothing
       --tools             print the tool schema the model would be sent
       --session PATH      save the transcript as one session record
+      --verify           run the feature beside the declaration, against the doubles
+      --steps            print the built-in step vocabulary and exit
+      --heading          with --steps, write it as the whole of docs/STEPS.md
+      --feature PATH     run that feature file instead of the sibling one
       --json              print one JSON object on stdout; human text to stderr
       --show-lines N      lines of a tool result to render (default 12)
   -q, --quiet             print the final answer and nothing else
@@ -1554,12 +1648,54 @@ function cli.run(opts, world)
       tools = spec.schema(agent),
     })
   end
-  if opts.check then
+  -- `--check` on its own looks at the declaration; with a feature named it looks at the
+  -- feature, which is the branch below. One flag, one meaning: look before you run.
+  if opts.check and not (opts.verify or opts.feature) then
     return report(check_text(agent, opts), {
       agent = agent.name, model = agent.model, code = codes.answered,
       budget = opts.budget or agent.budget, tools = spec.schema(agent),
       problems = {},
     })
+  end
+
+  -- A feature file: what the agent DOES, run against the doubles. No prompt is resolved,
+  -- because the scenario's `When` line is the prompt, and no real port is reached --
+  -- `--verify` has no door to one.
+  if opts.verify or opts.feature then
+    if not (gherkin and behaviour) then
+      return nil, { code = codes.world, message = "this build has no feature reader" }
+    end
+    local at = opts.feature or (tostring(opts.path):gsub("%.lua$", "") .. ".feature")
+    local text, why_read = world.read(at)
+    if text == nil then
+      return nil, { code = codes.usage,
+        message = at .. ": " .. (why_read == "missing" and "no such feature file" or tostring(why_read)) }
+    end
+    local pickles, bad = gherkin.pickle(text)
+    if not pickles then
+      return nil, { code = codes.declaration, message = at .. " cannot be read:", lines = { bad } }
+    end
+    local drivers = cli.drivers(agent, function (prompt, port, ropts)
+      local topts = { calls_per_step = opts.calls_per_step, max_depth = opts.max_depth }
+      if ropts and ropts.budget then topts.budget = ropts.budget end
+      if opts.budget then topts.budget = opts.budget end
+      if type(agent.name) == "string" then topts.id = agent.name end
+      return turn.run(agent, prompt, port, topts)
+    end)
+
+    if opts.check then
+      local problems = behaviour.check(pickles, drivers)
+      if #problems == 0 then
+        world.out(at .. ": " .. #pickles .. " scenario(s), nothing to report\n")
+        return codes.answered
+      end
+      for i = 1, #problems do world.out(at .. ":" .. problems[i] .. "\n") end
+      return codes.declaration
+    end
+
+    local report = behaviour.run(pickles, drivers, { eval = false })
+    world.out(behaviour.report(report, { verbose = (opts.verbose or 0) >= 1 }))
+    return report.ok and codes.answered or codes.declaration
   end
 
   local prompt, why = resolve_prompt(opts, world)
@@ -1722,6 +1858,16 @@ local function main_body(argv, world)
   end
   if opts.version then
     world.out("pi " .. cli.version .. "\n")
+    return codes.answered
+  end
+  -- The built-in step vocabulary. No declaration is needed to ask what the words are,
+  -- and `docs/STEPS.md` is rendered from exactly this and never hand-edited.
+  if opts.show_steps then
+    if behaviour == nil then
+      world.err("pi: this build has no feature reader\n")
+      return codes.world
+    end
+    world.out(cli.steps_text({ heading = opts.heading == true }))
     return codes.answered
   end
 

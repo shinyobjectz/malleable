@@ -5,6 +5,8 @@
 
 local spec = {}
 
+
+
 local function fail(fmt, ...)
   error(string.format(fmt, ...), 3)
 end
@@ -57,6 +59,8 @@ function spec.new()
     beat_order = {},
     servers = {},            -- name -> mcp server   (src/mcp.lua)
     server_order = {},
+    steps = {},              -- expression -> step   (src/behaviour.lua)
+    step_order = {},
   }
 end
 
@@ -129,6 +133,41 @@ end
 -- The body is either `does` (the text, right here) or `file` (a workspace path read
 -- through the fs port when the model asks for it). Never both: two sources of one
 -- procedure is a procedure nobody can be sure they are reading.
+-- A step of a feature file, bound to a body. Curried like a tool, and deliberately
+-- narrower than cucumber's: a step declares its PHASE by which body it gives, and there
+-- is no `when` slot -- the three ways a run starts are the harness's, because a `when` a
+-- workspace could write is the door through which a scenario starts causing what it
+-- claims to be observing (rule 6).
+--
+-- The SHAPE is checked here; the expression is compiled and its collisions refused in
+-- `behaviour.declare`, which is what a declaration file actually reaches. Rule 2 is why
+-- the split exists: this file requires nothing, reaches nothing, and calls nothing it
+-- was handed, so loading a declaration stays safe on an untrusted file.
+function spec.add_step(a, expr, d, compiled)
+  if type(expr) ~= "string" or expr == "" then fail("a step needs an expression") end
+  if a.steps[expr] then fail("the step %q is declared twice", expr) end
+  if type(d) ~= "table" then fail("agent.step %q takes a table, got %s", expr, type(d)) end
+
+  local has_given, has_then = type(d.given) == "function", type(d.then_) == "function"
+  if d.given ~= nil and not has_given then fail("the step %q: `given` is a function", expr) end
+  if d.then_ ~= nil and not has_then then fail("the step %q: `then_` is a function", expr) end
+  if d.when ~= nil or d.when_ ~= nil then
+    fail("the step %q gives a `when`, and there is no such slot: the three ways a run starts are the harness's", expr)
+  end
+  if has_given and has_then then
+    fail("the step %q gives both `given` and `then_`; a step is in one phase", expr)
+  end
+  if not has_given and not has_then then
+    fail("the step %q needs `given` (it writes the world) or `then_` (it reads the result)", expr)
+  end
+
+  local step = { expr = expr, compiled = compiled, given = d.given, then_ = d.then_,
+                 phase = has_given and "given" or "then" }
+  a.steps[expr] = step
+  a.step_order[#a.step_order + 1] = expr
+  return step
+end
+
 function spec.add_skill(a, name, s)
   if type(name) ~= "string" or name == "" then fail("a skill needs a name") end
   if a.skills[name] then fail("the skill %q is declared twice", name) end

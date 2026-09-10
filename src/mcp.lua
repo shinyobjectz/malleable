@@ -125,12 +125,31 @@ function mcp.connect(a, p, opts)
     return added, problems
   end
 
+  -- Optionally watched. `opts.watch(name)` is called as each server is reached and
+  -- answers a function to call when it has been, with whether it answered and how many
+  -- tools came back. Two scalars, and nothing else can travel: this is how `agent.run`
+  -- puts a `malleable.server` span around a connection without this module holding a
+  -- recorder, reading a clock, or being able to write a span attribute at all. A
+  -- callback that could carry a string would be a payload leak with extra steps.
+  local watch = type(opts.watch) == "function" and opts.watch or nil
+  local function watching(name)
+    if not watch then return function () end end
+    local ok, finish = pcall(watch, name)
+    if ok and type(finish) == "function" then
+      return function (reached, tools) pcall(finish, reached, tools) end
+    end
+    return function () end
+  end
+
   a.connected = a.connected or {}
   for i = 1, #a.server_order do
     local server = a.servers[a.server_order[i]]
     if not a.connected[server.name] then
+      local done = watching(server.name)
+      local before = #added
       local listed, err = port.list(server.name, server.config)
       if type(listed) ~= "table" then
+        done(false, 0)
         problems[#problems + 1] = ("the server %q did not answer with its tools: %s"):format(
           server.name, type(err) == "table" and (err.message or err.code) or tostring(err))
       else
@@ -188,6 +207,7 @@ function mcp.connect(a, p, opts)
           end
         end
         a.connected[server.name] = true
+        done(true, #added - before)
       end
     end
   end

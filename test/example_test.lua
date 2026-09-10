@@ -12,6 +12,39 @@ local agent = require "agent"
 
 local T = {}
 
+-- example/embedded.lua: the OTHER worked example, and the one that proves the embed
+-- claim. It runs an agent inside `agent.sandbox` -- a real shell over a real in-memory
+-- filesystem -- with nothing from the host at all. If that stops working, the sentence
+-- "this harness runs wherever a Lua does" stops being true and nothing else would say so.
+function T.the_embedded_example_runs_inside_its_own_world()
+  local agent = require "agent"
+  agent.reset()
+  local chunk = assert(loadfile(here .. "/../example/embedded.lua"))
+  local saved = arg
+  arg = {}
+  local ok, why = pcall(chunk)
+  arg = saved
+  assert(ok, "the embedded example does not load: " .. tostring(why))
+
+  local declared_spec = agent.spec()
+  assert(declared_spec.name == "keeper", tostring(declared_spec.name))
+  assert(declared_spec.tools.shell ~= nil, "the embedded example declares no shell")
+
+  local world = agent.sandbox {
+    fs  = { ["notes/monday.md"] = "ship the reader\n", ["notes/tuesday.md"] = "ship the reader\n" },
+    ask = { shell = true },
+    model = {
+      { tool = "shell", args = { command = "cat notes/monday.md notes/tuesday.md | sort -u > notes/all.md" } },
+      { text = "folded" },
+    },
+  }
+  local r = agent.run("Tidy the notes.", world)
+  assert(r.stop == "answered", tostring(r.stop) .. ": " .. tostring(r.reason))
+  assert(world.fs.files["notes/all.md"] == "ship the reader\n",
+         tostring(world.fs.files["notes/all.md"]))
+  agent.reset()
+end
+
 -- Loading the example declares into the module's own prefix, so every test here starts
 -- by clearing it and loading the file again. `dofile`, not `require`: a required file
 -- is loaded once and these tests want it fresh.

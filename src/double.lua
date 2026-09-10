@@ -17,6 +17,10 @@
 
 local port = require "port"
 
+-- The executor, for `double.world { shell = true }`. Reached through this module rather
+-- than required by every caller of it, so a whole world stays one call.
+local shell_module = require "shell"
+
 local double = {}
 
 local function copy(t)
@@ -639,10 +643,28 @@ function double.world(cfg)
     model = double.model(model)
   end
 
+  local fs = built(cfg.fs, "read") and cfg.fs or double.fs(cfg.fs)
+
+  -- `shell = true` swaps the scripted shell for the executor in `src/shell.lua`, over
+  -- THIS world's own filesystem -- so `echo x > a.txt` is a file the next `fs.read` finds.
+  --
+  -- Opt-in, and it stays opt-in. A world that quietly ran commands nobody scripted would
+  -- make a test pass for a reason the test did not state, and "nothing is scripted for
+  -- that" is the most useful sentence a test double ever says. `agent.sandbox` is the
+  -- door that turns it on, because an EMBEDDER wants the opposite default from a test.
+  local sh
+  if built(cfg.sh, "run") then
+    sh = cfg.sh
+  elseif cfg.shell == true then
+    sh = shell_module.port(fs)
+  else
+    sh = double.sh(cfg.sh)
+  end
+
   return {
     model = model,
-    fs    = built(cfg.fs, "read")       and cfg.fs    or double.fs(cfg.fs),
-    sh    = built(cfg.sh, "run")        and cfg.sh    or double.sh(cfg.sh),
+    fs    = fs,
+    sh    = sh,
     clock = built(cfg.clock, "now")     and cfg.clock or double.clock(cfg.clock),
     ask   = built(cfg.ask, "request")   and cfg.ask   or double.ask(cfg.ask),
     log   = built(cfg.log, "write")     and cfg.log   or double.log(),
