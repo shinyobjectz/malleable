@@ -1,0 +1,198 @@
+-- mcp -- tools that live in another process.
+--
+-- A tool in this tree is a Lua body. A tool on a server is a name, a sentence and a
+-- schema that arrived over a wire, and the only honest thing to do with it is to make
+-- it the same kind of thing before the model ever sees it: by the time `agent.schema`
+-- is read there is no way to tell which tools were declared here and which were
+-- fetched, because the model's job is not to know.
+--
+-- The seam is the same one as everywhere else. A declaration NAMES a server:
+--
+--     agent.uses "github" {
+--       command = { "npx", "-y", "@modelcontextprotocol/server-github" },
+--       tools   = { "list_issues", "create_issue" },   -- everything, if absent
+--       ask     = true,
+--     }
+--
+-- and nothing reaches for it: rule 2 holds for a declaration that names a network as
+-- firmly as for one that names a file. `mcp.connect` asks, at run time, through the
+-- `mcp` port, which owes
+--
+--     list(server, config) -> { descriptor, ... } | nil, err
+--     call(server, tool, args) -> text | result | nil, err
+--
+-- and knows what a transport is so that this module does not. Everything else the
+-- declaration states -- a command line, a URL, headers -- is passed to the port
+-- untouched; this module neither reads it nor validates it, because the day it does is
+-- the day adding a transport means editing two files.
+--
+-- A descriptor is either already in the harness's shape (`args`) or carries the JSON
+-- Schema a server actually sends (`input_schema` / `inputSchema`), which `mcp.params`
+-- converts. Both are here because the first is what a test writes and the second is
+-- what a server sends, and a module that only accepts the first has tests that pass
+-- against a world that does not exist.
+
+local spec = require "spec"
+
+local mcp = {}
+
+local function fail(fmt, ...)
+  error("agent: " .. string.format(fmt, ...), 3)
+end
+
+-- JSON Schema, as far as a tool signature needs it. Anything richer -- oneOf, nested
+-- objects, enums -- becomes the nearest of the five kinds and keeps its description,
+-- because a tool argument the model can still fill imperfectly beats a tool that could
+-- not be offered at all. What is NOT done here is inventing a constraint the server
+-- did not state: an unknown type becomes a string with the schema's own words.
+local KINDS = {
+  string = "string", number = "number", integer = "number",
+  boolean = "boolean", object = "table", array = "list",
+}
+
+function mcp.params(schema)
+  local args = {}
+  if type(schema) ~= "table" then return args end
+  local props = schema.properties
+  if type(props) ~= "table" then return args end
+  local required = {}
+  if type(schema.required) == "table" then
+    for i = 1, #schema.required do required[schema.required[i]] = true end
+  end
+  for k, v in pairs(props) do
+    if type(k) == "string" then
+      local t = type(v) == "table" and v.type or nil
+      if type(t) == "table" then t = t[1] end                 -- ["string","null"]
+      local kind = KINDS[t] or "string"
+      local why = (type(v) == "table" and type(v.description) == "string") and v.description or ""
+      local maker = spec.types[required[k] and kind or (kind .. "_opt")]
+      args[k] = maker(why)
+    end
+  end
+  return args
+end
+
+-- What the model will call this tool. A server's tool name is unique on that server
+-- and nowhere else, so two servers offering `search` must not collide silently into
+-- one -- and the collision would be silent, because `spec.add_tool` would refuse the
+-- second and the run would simply be missing a tool.
+function mcp.tool_name(server, tool)
+  return server.name .. (server.join or "_") .. tool
+end
+
+local function text_of(v)
+  if type(v) == "string" then return v end
+  if type(v) == "table" then
+    -- The content-list shape a server answers with. Text parts, in order; anything
+    -- else is named rather than dropped, so an image does not read as an empty reply.
+    if type(v.content) == "table" then
+      local parts = {}
+      for i = 1, #v.content do
+        local c = v.content[i]
+        if type(c) == "table" then
+          if type(c.text) == "string" then parts[#parts + 1] = c.text
+          elseif type(c.type) == "string" then parts[#parts + 1] = "[" .. c.type .. "]" end
+        elseif type(c) == "string" then parts[#parts + 1] = c end
+      end
+      if #parts > 0 then return table.concat(parts, "\n") end
+    end
+    if type(v.text) == "string" then return v.text end
+  end
+  return tostring(v)
+end
+
+-- Ask every declared server what it has, and add what it answers as tools.
+--
+-- Returns `added, problems` -- both lists of strings, both always tables. A server that
+-- is down is a PROBLEM and not an error: the run continues with the tools it does have,
+-- because one unreachable server should not stop an agent that also reads files. A
+-- server that answers with something unreadable is the same. What is NOT tolerated is a
+-- name collision, which is reported per tool.
+--
+-- Idempotent. `a.connected[name]` records what has been asked already, so a host that
+-- calls this on every run does not re-add on the second.
+function mcp.connect(a, p, opts)
+  opts = opts or {}
+  if type(a) ~= "table" then fail("mcp.connect takes a declaration table") end
+  local added, problems = {}, {}
+  if #a.server_order == 0 then return added, problems end
+
+  local port = p and p.mcp
+  if type(port) ~= "table" or type(port.list) ~= "function" or type(port.call) ~= "function" then
+    for i = 1, #a.server_order do
+      problems[#problems + 1] = ("the server %q was declared, and this run has no mcp port to reach it with"):format(a.server_order[i])
+    end
+    return added, problems
+  end
+
+  a.connected = a.connected or {}
+  for i = 1, #a.server_order do
+    local server = a.servers[a.server_order[i]]
+    if not a.connected[server.name] then
+      local listed, err = port.list(server.name, server.config)
+      if type(listed) ~= "table" then
+        problems[#problems + 1] = ("the server %q did not answer with its tools: %s"):format(
+          server.name, type(err) == "table" and (err.message or err.code) or tostring(err))
+      else
+        local want = nil
+        if server.tools then
+          want = {}
+          for j = 1, #server.tools do want[server.tools[j]] = true end
+        end
+        local seen = {}
+        for j = 1, #listed do
+          local d = listed[j]
+          if type(d) ~= "table" or type(d.name) ~= "string" or d.name == "" then
+            problems[#problems + 1] = ("the server %q offered a tool with no name"):format(server.name)
+          elseif want and not want[d.name] then
+            -- Not a problem: the declaration said which tools to take, and this is
+            -- the declaration being obeyed.
+          else
+            seen[d.name] = true
+            local local_name = mcp.tool_name(server, d.name)
+            local args = type(d.args) == "table" and d.args
+                      or mcp.params(d.input_schema or d.inputSchema)
+            local about = type(d.about) == "string" and d.about
+                       or (type(d.description) == "string" and d.description)
+                       or ("the " .. d.name .. " tool on " .. server.name)
+            local ask = server.ask
+            if ask == nil then ask = true end   -- rule 4: another process is not this one
+            local ok, why = pcall(spec.add_tool, a, local_name, {
+              about = about,
+              args  = args,
+              ask   = ask,
+              run   = function (c)
+                local out, cerr = port.call(server.name, d.name, c.args)
+                if out == nil then
+                  return ("%s could not run %s: %s"):format(server.name, d.name,
+                    type(cerr) == "table" and (cerr.message or cerr.code) or tostring(cerr))
+                end
+                return text_of(out)
+              end,
+            })
+            if ok then added[#added + 1] = local_name
+            else problems[#problems + 1] = tostring(why) end
+          end
+        end
+        if want then
+          local missing = {}
+          for _, wanted in ipairs(server.tools) do
+            if not seen[wanted] then missing[#missing + 1] = wanted end
+          end
+          if #missing > 0 then
+            -- Named loudly. A declaration that asks for a tool the server does not
+            -- have is a typo or a version drift, and both read at run time as an agent
+            -- that quietly cannot do the thing it was written to do.
+            problems[#problems + 1] = ("the server %q does not offer: %s"):format(
+              server.name, table.concat(missing, ", "))
+          end
+        end
+        a.connected[server.name] = true
+      end
+    end
+  end
+  table.sort(added)
+  return added, problems
+end
+
+return mcp

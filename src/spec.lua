@@ -1,0 +1,271 @@
+-- The declaration surface. Rule 2: this builds a table and runs nothing.
+--
+-- Every entry point is a setter that returns the agent table, so a file reads as a
+-- list of statements rather than a builder chain that has to be closed.
+
+local spec = {}
+
+local function fail(fmt, ...)
+  error(string.format(fmt, ...), 3)
+end
+
+-- The granularities a beat may dedup on. "ever" is the one that never repeats, which
+-- is how a one-shot is said without a second word for it.
+local GRAINS = { hour = 3600, day = 86400, week = 604800, ever = "ever" }
+spec.grains = GRAINS
+
+local function is_param(v)
+  return type(v) == "table" and v.__param == true
+end
+
+-- Argument types. `agent.string "why"` reads as a type and its description on one
+-- line, which keeps a tool signature legible at a glance.
+local function param(kind, required)
+  return function (description)
+    if description ~= nil and type(description) ~= "string" then
+      fail("an argument's description is a string, got %s", type(description))
+    end
+    return { __param = true, kind = kind, required = required, description = description or "" }
+  end
+end
+
+spec.types = {
+  string      = param("string",  true),
+  string_opt  = param("string",  false),
+  number      = param("number",  true),
+  number_opt  = param("number",  false),
+  boolean     = param("boolean", true),
+  boolean_opt = param("boolean", false),
+  table       = param("object",  true),
+  table_opt   = param("object",  false),
+  list        = param("array",   true),
+  list_opt    = param("array",   false),
+}
+
+-- A fresh, empty agent. Held in a table rather than a module upvalue so two agents
+-- can be declared in one process without leaking into each other.
+function spec.new()
+  return {
+    name = nil, model = nil, system = nil,
+    budget = 24,             -- rule 5: every run ends
+    tools = {},              -- name -> tool
+    order = {},              -- declaration order, so the model sees a stable list
+    hooks = {},              -- event -> { fn, ... }
+    skills = {},             -- name -> skill        (src/skills.lua)
+    skill_order = {},
+    beats = {},              -- name -> beat         (src/schedule.lua)
+    beat_order = {},
+    servers = {},            -- name -> mcp server   (src/mcp.lua)
+    server_order = {},
+  }
+end
+
+function spec.set_name(a, v)
+  if type(v) ~= "string" or v == "" then fail("agent.name takes a non-empty string") end
+  a.name = v
+end
+
+function spec.set_model(a, v)
+  if type(v) ~= "string" or v == "" then fail("agent.model takes a model id, like \"openrouter:inception/mercury-2.5\"") end
+  a.model = v
+end
+
+function spec.set_system(a, v)
+  if type(v) ~= "string" then fail("agent.system takes a string") end
+  a.system = v
+end
+
+function spec.set_budget(a, v)
+  if type(v) ~= "number" or v < 1 or v ~= math.floor(v) then
+    fail("agent.budget takes a whole number of steps, at least 1")
+  end
+  a.budget = v
+end
+
+-- Rule 3: a tool is a name, a why, typed arguments and a body.
+function spec.add_tool(a, name, t)
+  if type(name) ~= "string" or name == "" then fail("a tool needs a name") end
+  if a.tools[name] then fail("the tool %q is declared twice", name) end
+  if type(t) ~= "table" then fail("agent.tool %q takes a table, got %s", name, type(t)) end
+  if type(t.about) ~= "string" or t.about == "" then
+    fail("the tool %q needs `about`: a tool the model cannot understand is one it will misuse", name)
+  end
+  if type(t.run) ~= "function" then fail("the tool %q needs `run = function (c) ... end`", name) end
+
+  local args, order = {}, {}
+  if t.args ~= nil then
+    if type(t.args) ~= "table" then fail("the tool %q: `args` is a table of name = agent.<type> \"why\"", name) end
+    for k, v in pairs(t.args) do
+      if type(k) ~= "string" then fail("the tool %q: an argument name is a string", name) end
+      if not is_param(v) then
+        fail("the tool %q: argument %q must be one of agent.string / number / boolean / table / list (or its _opt form)", name, k)
+      end
+      args[k] = v
+      order[#order + 1] = k
+    end
+    table.sort(order)
+  end
+
+  if t.ask ~= nil and type(t.ask) ~= "boolean" then fail("the tool %q: `ask` is true or false", name) end
+
+  local tool = { name = name, about = t.about, args = args, arg_order = order, run = t.run, ask = t.ask or false }
+  a.tools[name] = tool
+  a.order[#a.order + 1] = name
+  return tool
+end
+
+function spec.add_hook(a, event, fn)
+  if type(event) ~= "string" or event == "" then fail("agent.on takes an event name") end
+  if type(fn) ~= "function" then fail("agent.on %q takes a function", event) end
+  a.hooks[event] = a.hooks[event] or {}
+  local h = a.hooks[event]
+  h[#h + 1] = fn
+end
+
+-- Rule 3 again, for a procedure rather than a tool: a skill is a name, a why and a
+-- body a PERSON wrote. `agent.plan` is this run's and the agent authored it; a skill
+-- outlives the run and the agent may not edit it, which is the whole difference.
+--
+-- The body is either `does` (the text, right here) or `file` (a workspace path read
+-- through the fs port when the model asks for it). Never both: two sources of one
+-- procedure is a procedure nobody can be sure they are reading.
+function spec.add_skill(a, name, s)
+  if type(name) ~= "string" or name == "" then fail("a skill needs a name") end
+  if a.skills[name] then fail("the skill %q is declared twice", name) end
+  if type(s) ~= "table" then fail("agent.skill %q takes a table, got %s", name, type(s)) end
+  if type(s.about) ~= "string" or s.about == "" then
+    fail("the skill %q needs `about`: one sentence, and it is all the model reads until it asks for the body", name)
+  end
+  local has_does, has_file = type(s.does) == "string", type(s.file) == "string"
+  if s.does ~= nil and not has_does then fail("the skill %q: `does` is the procedure, as text", name) end
+  if s.file ~= nil and not has_file then fail("the skill %q: `file` is a workspace-relative path, as a string", name) end
+  if has_does and has_file then
+    fail("the skill %q states both `does` and `file`; a procedure has one source", name)
+  end
+  if not has_does and not has_file then
+    fail("the skill %q needs `does` (the text) or `file` (a path the fs port reads)", name)
+  end
+  local skill = { name = name, about = s.about, does = s.does, file = s.file, from = "declared" }
+  a.skills[name] = skill
+  a.skill_order[#a.skill_order + 1] = name
+  return skill
+end
+
+-- A beat. `every` is a whole number of seconds, or `day_at` is a wall-clock time; a
+-- beat states exactly one of them, because a beat that is both is two beats.
+--
+-- `once_per` is what makes "never twice for the same day" mean anything: it names the
+-- granularity a durable ledger dedups on. Without a ledger there is no such sentence
+-- to write, which is why the ledger is a port and not a table in this process.
+function spec.add_beat(a, name, b)
+  if type(name) ~= "string" or name == "" then fail("a beat needs a name") end
+  if a.beats[name] then fail("the beat %q is declared twice", name) end
+  if type(b) ~= "table" then fail("agent.every %q takes a table, got %s", name, type(b)) end
+  local has_secs, has_at = b.every ~= nil, b.day_at ~= nil
+  if has_secs and has_at then
+    fail("the beat %q states both `every` and `day_at`; a beat has one period", name)
+  end
+  if not has_secs and not has_at then
+    fail("the beat %q needs `every = <seconds>` or `day_at = \"18:00\"`", name)
+  end
+  if has_secs and (type(b.every) ~= "number" or b.every < 1 or b.every ~= math.floor(b.every)) then
+    fail("the beat %q: `every` is a whole number of seconds, at least 1", name)
+  end
+  local hour, minute
+  if has_at then
+    if type(b.day_at) ~= "string" then fail("the beat %q: `day_at` is a clock time, like \"18:00\"", name) end
+    local h, m = b.day_at:match("^(%d%d?):(%d%d)$")
+    hour, minute = tonumber(h), tonumber(m)
+    if not hour or hour > 23 or minute > 59 then
+      fail("the beat %q: `day_at` is a 24-hour clock time, like \"18:00\", and arrived as %q", name, b.day_at)
+    end
+  end
+  if type(b.runs) ~= "string" and type(b.runs) ~= "function" then
+    fail("the beat %q needs `runs`: the prompt this beat starts a run with, or a function", name)
+  end
+  if type(b.runs) == "string" and b.runs == "" then
+    fail("the beat %q: `runs` is a non-empty prompt", name)
+  end
+  if b.once_per ~= nil and not GRAINS[b.once_per] then
+    fail("the beat %q: `once_per` is \"hour\", \"day\", \"week\" or \"ever\", and arrived as %s", name, tostring(b.once_per))
+  end
+  if b.about ~= nil and type(b.about) ~= "string" then fail("the beat %q: `about` is a sentence", name) end
+  if b.tz ~= nil and (type(b.tz) ~= "number" or b.tz ~= math.floor(b.tz)) then
+    fail("the beat %q: `tz` is the local offset in whole seconds from UTC", name)
+  end
+  -- How late is too late. Absent means the work does not expire, which is the common
+  -- case and the reason it is not required: a digest of a day that has ended is still a
+  -- digest (spec/schedule.md, "A beat whose time passed while nothing was running").
+  if b.grace ~= nil and (type(b.grace) ~= "number" or b.grace < 0) then
+    fail("the beat %q: `grace` is how many seconds late it may still run, as a number", name)
+  end
+  local beat = {
+    name = name, about = b.about, every = b.every, day_at = b.day_at,
+    hour = hour, minute = minute, runs = b.runs, once_per = b.once_per, tz = b.tz,
+    grace = b.grace,
+  }
+  a.beats[name] = beat
+  a.beat_order[#a.beat_order + 1] = name
+  return beat
+end
+
+-- A server whose tools live in another process. Nothing here reaches it: rule 2 holds
+-- for a declaration that names a network as firmly as for one that names a file.
+-- `mcp.connect` is what asks, at run time, through the port.
+function spec.add_server(a, name, m)
+  if type(name) ~= "string" or name == "" then fail("a server needs a name") end
+  if a.servers[name] then fail("the server %q is declared twice", name) end
+  if type(m) ~= "table" then fail("agent.uses %q takes a table, got %s", name, type(m)) end
+  if m.tools ~= nil then
+    if type(m.tools) ~= "table" then
+      fail("the server %q: `tools` is the list of tool names to take from it", name)
+    end
+    for i = 1, #m.tools do
+      if type(m.tools[i]) ~= "string" or m.tools[i] == "" then
+        fail("the server %q: `tools` holds tool names, and entry %d is %s", name, i, type(m.tools[i]))
+      end
+    end
+  end
+  if m.ask ~= nil and type(m.ask) ~= "boolean" then fail("the server %q: `ask` is true or false", name) end
+  if m.join ~= nil and (type(m.join) ~= "string") then
+    fail("the server %q: `join` is what goes between the server name and the tool name", name)
+  end
+  if m.about ~= nil and type(m.about) ~= "string" then fail("the server %q: `about` is a sentence", name) end
+  local server = {
+    name = name, about = m.about, tools = m.tools, ask = m.ask, join = m.join or "_",
+    -- Anything else stated is the host's business: a command line, a URL, a header
+    -- table. This module neither reads it nor knows what a transport is; the port does.
+    config = m,
+  }
+  a.servers[name] = server
+  a.server_order[#a.server_order + 1] = name
+  return server
+end
+
+-- What the model is told a tool is. Deliberately the whole of it: a name, a sentence
+-- and the arguments. If something is not here the model cannot use it.
+function spec.schema(a)
+  local out = {}
+  for i = 1, #a.order do
+    local t = a.tools[a.order[i]]
+    local args = {}
+    for j = 1, #t.arg_order do
+      local k = t.arg_order[j]
+      local p = t.args[k]
+      args[#args + 1] = { name = k, kind = p.kind, required = p.required, description = p.description }
+    end
+    out[#out + 1] = { name = t.name, about = t.about, args = args, ask = t.ask }
+  end
+  return out
+end
+
+-- Refuse an agent that cannot be run, with the reason, before anything is started.
+function spec.problems(a)
+  local out = {}
+  if not a.name then out[#out + 1] = "no agent.name" end
+  if not a.model then out[#out + 1] = "no agent.model" end
+  if #a.order == 0 then out[#out + 1] = "no tools: an agent with no tools can only answer, never act" end
+  return out
+end
+
+return spec
