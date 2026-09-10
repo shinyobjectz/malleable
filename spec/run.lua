@@ -33,8 +33,14 @@ local FEATURES = {
   { "port",      false }, { "provider",  false }, { "schedule", false },
   { "skills",    false }, { "subagent",  false }, { "tools_fs", false },
   { "tools_shell", false }, { "turn",    false }, { "work",     false },
-  { "compaction",  false }, { "console", false }, { "interpret-marks", false },
+  { "compaction",  false }, { "interpret-marks", false },
 }
+
+-- A spec/*.md that is not on that list is a promise nothing counts. `tools/spec-check.sh`
+-- globs the directory and fails when it finds one, because plain Lua cannot list a
+-- directory and a test that shelled out to do it would be the only test here that spawns.
+-- So adding a spec means adding its line, in the same commit. console and apps are in the
+-- working tree unlisted right now, and the script says so, which is the rule working.
 
 --- Is this file the script a person typed, or was it required by the test suite?
 ---

@@ -75,6 +75,26 @@ function T.every_feature_file_is_listed_and_every_listed_one_is_there()
   end
 end
 
+-- Every name on the work list is a spec that actually exists. The other direction --
+-- every spec/*.md appears on the list -- cannot be checked here: plain Lua cannot list a
+-- directory, and a test that shelled out to do it would be the only test in the tree that
+-- spawns. `tools/spec-check.sh` owns that half, because bash can glob.
+--
+-- This half still matters on its own. A listed name with no .md is a spec somebody
+-- deleted while leaving the promise counted, which quietly inflates the work list.
+function T.every_name_on_the_work_list_is_a_spec_that_exists()
+  local f = io.open(here .. "/../spec/run.lua", "rb")
+  local source = f:read("*a")
+  f:close()
+  local missing = {}
+  for name in source:gmatch('{%s*"([%w%-_]+)",%s*%a+%s*}') do
+    local md = io.open(here .. "/../spec/" .. name .. ".md", "rb")
+    if md then md:close() else missing[#missing + 1] = name end
+  end
+  assert(#missing == 0,
+         "listed on the work list with no spec/<name>.md: " .. table.concat(missing, ", "))
+end
+
 -- And the count of specs still promising only in prose, which is the number this whole
 -- exercise exists to drive to zero.
 function T.the_specs_still_promising_only_in_prose_are_counted()
