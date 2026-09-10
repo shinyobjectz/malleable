@@ -1,0 +1,18 @@
+{
+  "name": "malleable",
+  "version": "0.1.0",
+  "description": "An agent harness you declare in Lua.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": "./agent.lua",
+    "./package.json": "./package.json",
+    "./agent.lua": "./agent.lua",
+    "./src/*": "./src/*"
+  },
+  "files": [
+    "agent.lua",
+    "src",
+    "bin"
+  ]
+}
