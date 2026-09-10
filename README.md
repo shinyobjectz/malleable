@@ -23,22 +23,17 @@ Native Lua, standard library only. No C modules, no LuaRocks, no network client 
 own. It targets Lua 5.4 and stays inside the subset LuaJIT 5.1 also accepts, so the same
 tree runs embedded in a host through `mlua` and on the `luajit` on your path.
 
-## Designed after Pi
+## Based on Pi
 
-Pi is the agent harness this is shaped by: an agent, its tools, a turn loop, an approval
-gate, a session, a context budget. Those are the parts, and their arrangement is the good
-idea worth keeping — a harness where the declaration is inert and the host owns every
-capability is a harness you can reason about.
+Pi's architecture, in Lua: an agent, its tools, a turn loop, an approval gate, a session,
+a context budget. Those parts, at the size Lua wants — twelve subsystems, no C modules,
+no network client, and a file that declares rather than runs.
 
-What is here is that architecture in Lua, at the size Lua wants: twelve subsystems, no C
-modules, no network client, and a file that declares rather than runs. It is not a port
-and does not try to be one — a full coding agent is a product, with a terminal interface,
-a session store on disk, a scheduler holding threads, telemetry and a package manager, and
-none of that is here. `agent.every` is not a scheduler: it states a beat and answers what
-is due, holds no thread, and starts no run unless a host asks for one. A smaller honest
-implementation is the point, not a shortfall.
-
-`DESIGN.md` locks the decisions and is the file to read first.
+Not a coding agent. A coding agent is a product — a terminal interface, a session store on
+disk, a scheduler holding threads, telemetry, a package manager — and none of that is here.
+`agent.every` is not a scheduler: it states a beat and answers what is due, holds no
+thread, and starts no run unless a host asks. `DESIGN.md` locks the decisions and is the
+file to read first.
 
 ## The five rules
 
