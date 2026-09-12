@@ -731,6 +731,101 @@ local function stub(text)
   return string.format('agent.step %q {\n  given = function (c) ... end,   -- or then_\n}', expr)
 end
 
+-- The scalar texts a step checks: its quoted strings and bare words, the scalars inside a
+-- {value}, the cells of its table, the lines of its doc string.
+local function texts_of(step, args, into)
+  -- Text only: a number in a Then line is a count, and counts are read by the call rule
+  -- below, never by finding "2" inside a scripted call's JSON.
+  local function add(v)
+    if type(v) == "string" then
+      if trim(v) ~= "" then into[#into + 1] = trim(v) end
+    elseif type(v) == "table" then
+      for _, x in pairs(v) do add(x) end
+    end
+  end
+  for i = 1, (args and (args.n or #args) or 0) do add(args[i]) end
+  if step.doc then for l in tostring(step.doc):gmatch("[^\n]+") do add(l) end end
+  -- a table's first row is its header: column names, which the declaration says
+  for r = 2, #(step.rows or {}) do for _, cell in ipairs(step.rows[r]) do add(cell) end end
+  return into
+end
+
+-- The Then lines of a scenario that READ THE SCRIPT (spec/behaviour.md, "Then lines that
+-- read the script"): a value the line checks is said only by a dropped model line, or it
+-- counts calls to a tool and the count is what the script made. A fact about the file,
+-- computed from the lines and the declaration's names, never from a prompt read as prose.
+local function script_readers(pickle, reg, drivers)
+  local script, elsewhere, calls = {}, {}, {}
+  local thens = {}
+  for i = 1, #pickle.steps do
+    local s = pickle.steps[i]
+    local def, args = match(reg, s.text)
+    if def and MODEL_SCRIPT[def.expr] then
+      script[#script + 1] = { line = s.line, text = s.text }
+      if def.expr == "the model calls {word} with {value}" then
+        calls[args[1]] = (calls[args[1]] or 0) + 1
+      end
+    elseif def and def.phase == "then" then
+      thens[#thens + 1] = { step = s, def = def, args = args }
+    else
+      texts_of(s, args, elsewhere)
+      elsewhere[#elsewhere + 1] = s.text
+    end
+  end
+  if #script == 0 then return {} end
+  local names = {}
+  for k in pairs(drivers.tools or {}) do names[k] = true end
+  for k, st in pairs(drivers.stores or {}) do
+    names[k] = true
+    for col in pairs(type(st) == "table" and st.columns or {}) do names[col] = true end
+  end
+  for k in pairs(drivers.beats or {}) do names[k] = true end
+  if type(drivers.schema) == "function" then
+    local ok, schema = pcall(drivers.schema)
+    for _, t in ipairs(ok and schema or {}) do
+      for _, arg in ipairs(t.args or {}) do names[arg.name] = true end
+    end
+  end
+  -- What the declaration itself says -- a tool's fixed answer, its about, a skill -- is said
+  -- elsewhere too: `drivers.said` is the declaration rendered as its Background (src/say.lua).
+  if type(drivers.said) == "string" then elsewhere[#elsewhere + 1] = drivers.said end
+
+  local function said_elsewhere(v)
+    for i = 1, #elsewhere do if contains(elsewhere[i], v) then return true end end
+    return false
+  end
+  local function said_by_script(v)
+    for i = 1, #script do if contains(script[i].text, v) then return script[i].line end end
+    return nil
+  end
+
+  local out = {}
+  for _, t in ipairs(thens) do
+    local why, from = nil, nil
+    -- a count of calls the script made
+    local tool = nil
+    for i = 1, (t.args.n or #t.args) do
+      if type(t.args[i]) == "string" and names[t.args[i]] then tool = t.args[i] end
+    end
+    for i = 1, (t.args.n or #t.args) do
+      if tool and type(t.args[i]) == "number" and calls[tool] and t.args[i] == calls[tool] and t.args[i] > 0 then
+        why = string.format("%d is how many times the script calls %s", t.args[i], tool)
+      end
+    end
+    -- a value only the script says
+    if not why then
+      for _, v in ipairs(texts_of(t.step, t.args, {})) do
+        if not names[v] and not said_elsewhere(v) then
+          local at = said_by_script(v)
+          if at then why, from = string.format("%s is said only by the model line at %d", q(v), at), at; break end
+        end
+      end
+    end
+    if why then out[#out + 1] = { line = t.step.line, text = t.step.text, why = why, from = from } end
+  end
+  return out, #thens
+end
+
 -- A scenario is NOT EVALUABLE when every step but the When scripts the model: it states
 -- nothing beyond what it put in the model's mouth, so a real model leaves nothing to score.
 -- Computed rather than declared; `@verify-only` is the one tag this runner reads.
@@ -940,14 +1035,18 @@ function behaviour.run(pickles, drivers, opts)
     local pickle = pickles[i]
 
     local can, why = true, nil
-    if eval then can, why = evaluable(pickle, reg) end
+    local reads, thens = nil, nil
+    if eval then
+      reads, thens = script_readers(pickle, reg, drivers)
+      can, why = evaluable(pickle, reg)
+    end
 
     if not can then
       -- Named with the reason, and NOT scored. A rate over a scenario that could not be
       -- evaluated would be a number about nothing.
       report.scenarios[#report.scenarios + 1] = {
         name = pickle.name, line = pickle.line, tags = pickle.tags,
-        outcome = "skipped", steps = {}, why = why,
+        outcome = "skipped", steps = {}, why = why, reads_script = reads,
       }
       report.not_evaluable = (report.not_evaluable or 0) + 1
     else
@@ -977,6 +1076,10 @@ function behaviour.run(pickles, drivers, opts)
       last.rate = passes / samples
       last.failures = kept
       last.observations = seen
+      if reads and #reads > 0 then
+        last.reads_script = reads
+        last.reads_all = (thens or 0) > 0 and #reads == thens
+      end
       if #seen > 0 then
         last.repertoire = observe.repertoire(seen)
         -- What the run did that nobody stated, from the commonest behaviour. An unstated
@@ -1077,7 +1180,8 @@ function behaviour.check(pickles, drivers)
 
   for i = 1, #(drivers.steps or {}) do
     local s = drivers.steps[i]
-    if not used[s.expr] then
+    -- a kit's steps are its vocabulary, not the file's promises (docs/spec/kit.md)
+    if not used[s.expr] and not s.kit then
       problems[#problems + 1] = string.format(
         "the step %s is declared and no scenario in this feature uses it", q(s.expr))
     end
@@ -1104,6 +1208,14 @@ function behaviour.report(t, opts)
     line("%s  %s  (line %d)%s", mark, s.name, s.line,
          (s.samples and s.samples > 1) and string.format("  %d/%d", s.passes, s.samples) or "")
     if s.why then line("        not evaluable: %s", s.why) end
+    -- The lines whose passing needs the script the eval dropped: the diagnosis of a low
+    -- rate, on the same screen as the rate (spec/behaviour.md, "Then lines that read the script").
+    if s.reads_script and #s.reads_script > 0 then
+      line("        reads the script%s:", s.reads_all and " (every Then line does; a real model may still pass it, and @verify-only says it never should)" or "")
+      for r = 1, #s.reads_script do
+        line("          line %d  %s  (%s)", s.reads_script[r].line, s.reads_script[r].text, s.reads_script[r].why)
+      end
+    end
     if s.repertoire and #s.repertoire > 0 then
       line("        %d distinct behaviour%s:", #s.repertoire, #s.repertoire == 1 and "" or "s")
       for b = 1, #s.repertoire do

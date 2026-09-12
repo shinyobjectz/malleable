@@ -375,6 +375,38 @@ Which has a consequence a person has to be told about rather than discover:
 Evaluability is computed, not declared, so nobody has to remember a tag. A scenario may opt
 out with `@verify-only`, and that is the only tag this runner reads.
 
+### Then lines that read the script
+
+(Amended 2026-09-12, from the showcase run against a real model, `docs/ergonomics.md`.)
+A scenario may be evaluable and still be about its transcript: `it calls colour 2 times`
+after two scripted calls, `it answers "dark red"` after `the model answers "dark red"`,
+a `the store {word} holds:` table whose cells the scripted arguments put there. Against
+a real model such a line fails for a reason that is the scenario's, not the agent's, and
+the eleven showcase scenarios of that kind had to be tagged by hand. The runner now says
+which lines those are, as a fact about the file rather than a judgement about the agent:
+
+* a Then line **reads the script** when a value it checks — a quoted string, a bare word
+  that is not a tool's or a store's name, a cell of its table, its doc string — appears
+  in the scenario only in a dropped model line, and nowhere in the When, in a world
+  Given, or in the declaration's names; or when it counts calls to a tool and the count
+  is exactly the number the script made;
+* the scenario is still scored. Its report carries `reads_script`, one entry a line with
+  the line number and the model line it reads, and the rendering says `reads the script:`
+  under the rate, so a 0 of 3 comes with its diagnosis on the same screen;
+* a scenario every one of whose Then lines reads the script is still scored, and the
+  report says every line does: `the call to add answers "42"` after `the model answers
+  "42"` reads the script by this rule and holds against a real model that adds, so a
+  scenario is never set aside on a label. (Amended while building it: the first draft made
+  such a scenario not evaluable, and the showcase's `add` and `shout` scenarios showed
+  the label is a fact about the file and the pass is a fact about the agent.)
+
+The rule is computed from the lines, the declaration's names (tools, arguments, stores,
+columns, beats) and the declaration rendered as its own Background (`src/say.lua`, so a
+tool's fixed answer is said by the declaration and not only by the script), never from
+the text of a prompt read as English. It labels; `@verify-only` decides. An author who meant the exact
+answer keeps the line and tags the scenario; one who meant the behaviour writes `the
+answer says` and drops the tag.
+
 ### The report
 
 Per scenario: samples, passes, the rate, and every failing sample kept whole — its result
@@ -429,4 +461,7 @@ says a thing is broken without saying where.
 * a rate over a scripted model that always does the right thing is 1, and over one that
   never does is 0, with every failing sample's result and trace kept;
 * `@verify-only` is skipped by an eval and run by a verify;
+* a Then line whose value only a dropped model line says is labelled `reads_script` with
+  both line numbers; one whose value the When, a world Given or the declaration says is
+  not; a count is labelled only when it is the script's; and a labelled scenario is scored;
 * everything above under `lua` and under `luajit`.

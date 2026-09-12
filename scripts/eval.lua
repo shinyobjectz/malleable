@@ -93,6 +93,10 @@ local summary = { feature = args.path, samples = args.samples, seconds = took, s
 for _, sc in ipairs(report.scenarios) do
   local line = string.format("%-56s %s", sc.name, sc.rate and string.format("%d/%d", sc.passes or 0, sc.samples or 0) or sc.outcome)
   io.write(line, "\n")
+  -- the Then lines whose passing needs the script this eval dropped (docs/spec/behaviour.md)
+  for _, r in ipairs(sc.reads_script or {}) do
+    io.write(string.format("    ~ line %d reads the script: %s\n", r.line, r.why))
+  end
   local entry = { name = sc.name, passes = sc.passes, samples = sc.samples, outcome = sc.outcome, failures = {} }
   for _, f in ipairs(sc.failures or {}) do
     local step

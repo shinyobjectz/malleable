@@ -679,4 +679,42 @@ function T.wrong_shapes_raise()
   assert(not pcall(behaviour.run, 7, {}))
 end
 
+function T.a_then_line_that_reads_only_the_script_is_labelled_and_the_scenario_is_still_scored()
+  local a = declared()
+  local pickles = assert(gherkin.pickle(FEATURE .. [[
+  Scenario: one line reads the script, one reads the world
+    Given the file "brief.md" contains:
+      """
+      The answer is forty-two.
+      """
+    And the model calls note with {"text": "one"}
+    And the model calls note with {"text": "two"}
+    And the model answers "dark red"
+    When the agent is asked "note something"
+    Then it calls note 2 times
+    And it answers "dark red"
+    And the answer says "forty-two"
+    And it calls note
+
+  Scenario: every line reads the script
+    Given the model calls note with {"text": "one"}
+    And the model answers "dark red"
+    When the agent is asked "go"
+    Then it answers "dark red"
+]]))
+  local r = behaviour.run(pickles, drivers(a), { eval = { model = a_model(1), samples = 2 } })
+  local s = r.scenarios[1]
+  assert(s.rate ~= nil, "the first scenario is still scored")
+  local reads = assert(s.reads_script, "no reads_script on the scored scenario")
+  assert(#reads == 2, "expected two labelled lines, got " .. #reads)
+  assert(reads[1].text == "it calls note 2 times" and reads[1].why:match("how many times"), reads[1].why)
+  assert(reads[2].text == 'it answers "dark red"' and reads[2].from ~= nil, reads[2].why)
+  assert(behaviour.report(r):match("reads the script:"), behaviour.report(r))
+  -- The line whose value a world Given says, and the line that names only a tool, are not labelled.
+  -- A scenario every one of whose Then lines reads the script is still scored, and says so.
+  local second = r.scenarios[2]
+  assert(second.rate ~= nil and second.reads_all == true, tostring(second.outcome))
+  assert(r.not_evaluable == 0, tostring(r.not_evaluable))
+end
+
 return T
