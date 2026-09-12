@@ -107,6 +107,14 @@ for _, p in ipairs(parts) do
       s.samples = s.samples + (sc.samples or 0)
       for _, st in ipairs(sc.steps or {}) do s.steps[#s.steps + 1] = st end
       for _, f in ipairs(sc.failures or {}) do s.failures[#s.failures + 1] = f end
+      s.refusals = s.refusals or {}
+      for _, r in ipairs(sc.refusals or {}) do
+        local key = r.tool .. (r.op and (" " .. r.op) or "") .. " | " .. r.why
+        local g = s.refusals[key]
+        if not g then g = { tool = r.tool, op = r.op, why = r.why, failed = r.failed, count = 0, in_samples = 0 }; s.refusals[key] = g end
+        g.count = g.count + (r.count or 0)
+        g.in_samples = g.in_samples + (r.in_samples or 0)
+      end
     end
   end
 end
@@ -147,6 +155,37 @@ for _, key in ipairs(order) do
     end
   end
   table_out.runs[#table_out.runs + 1] = run
+end
+
+-- the refusals across every file and model: the sentences the models read most, with the
+-- calls that drew them (docs/confidence-plan.md, item 4: a sentence drawn in more than one
+-- sample wants a tolerance or a rewrite)
+local all, aorder = {}, {}
+for _, key in ipairs(order) do
+  local m = merged[key]
+  for _, name in ipairs(m.names) do
+    for rkey, g in pairs(m.scenarios[name].refusals or {}) do
+      local a = all[rkey]
+      if not a then a = { tool = g.tool, op = g.op, why = g.why, failed = g.failed, count = 0, in_samples = 0, where = {} }; all[rkey] = a; aorder[#aorder + 1] = rkey end
+      a.count = a.count + g.count
+      a.in_samples = a.in_samples + g.in_samples
+      a.where[#a.where + 1] = m.file .. ": " .. name
+    end
+  end
+end
+table.sort(aorder, function (x, y) return all[x].in_samples > all[y].in_samples or (all[x].in_samples == all[y].in_samples and x < y) end)
+if #aorder > 0 then
+  w("## Refusals, most drawn first")
+  w("")
+  w("| samples | calls | tool | the sentence the model read |")
+  w("| --- | --- | --- | --- |")
+  for _, rkey in ipairs(aorder) do
+    local a = all[rkey]
+    w("| %d | %d | %s%s%s | %s |", a.in_samples, a.count, a.tool, a.op and (" " .. a.op) or "", a.failed and " (failed)" or "", (a.why:gsub("|", "\\|")))
+  end
+  w("")
+  table_out.refusals = {}
+  for _, rkey in ipairs(aorder) do table_out.refusals[#table_out.refusals + 1] = all[rkey] end
 end
 
 os.execute("mkdir -p " .. sh(args.out:match("^(.*)/[^/]*$") or "."))

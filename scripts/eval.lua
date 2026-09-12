@@ -112,7 +112,23 @@ for _, sc in ipairs(report.scenarios) do
   for _, r in ipairs(sc.reads_script or {}) do
     io.write(string.format("    ~ line %d reads the script: %s\n", r.line, r.why))
   end
-  local entry = { name = sc.name, passes = sc.passes, samples = sc.samples, outcome = sc.outcome, failures = {}, steps = sc.taken }
+  -- every refused or failed call across the samples, grouped by tool and sentence
+  local groups, gorder = {}, {}
+  for _, r in ipairs(sc.refusals or {}) do
+    local key = r.tool .. (r.op and (" " .. r.op) or "") .. " | " .. r.why
+    if not groups[key] then groups[key] = { tool = r.tool, op = r.op, why = r.why, failed = r.failed, count = 0, samples = {} }; gorder[#gorder + 1] = key end
+    groups[key].count = groups[key].count + 1
+    groups[key].samples[r.sample] = true
+  end
+  local refusals = {}
+  for _, key in ipairs(gorder) do
+    local g = groups[key]
+    local n = 0
+    for _ in pairs(g.samples) do n = n + 1 end
+    io.write(string.format("    ! %s%s x%d in %d sample(s): %s\n", g.tool, g.op and (" " .. g.op) or "", g.count, n, g.why:sub(1, 160)))
+    refusals[#refusals + 1] = { tool = g.tool, op = g.op, why = g.why, failed = g.failed, count = g.count, in_samples = n }
+  end
+  local entry = { name = sc.name, passes = sc.passes, samples = sc.samples, outcome = sc.outcome, failures = {}, steps = sc.taken, refusals = refusals }
   for _, f in ipairs(sc.failures or {}) do
     local step
     for _, st in ipairs(f.steps or {}) do if st.why and st.outcome ~= "skipped" then step = st; break end end

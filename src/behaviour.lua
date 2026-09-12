@@ -1064,12 +1064,25 @@ function behaviour.run(pickles, drivers, opts)
       }
       report.not_evaluable = (report.not_evaluable or 0) + 1
     else
-      local passes, last, kept, seen, taken = 0, nil, {}, {}, {}
+      local passes, last, kept, seen, taken, refusals = 0, nil, {}, {}, {}, {}
       for k = 1, samples do
         local one = run_scenario(pickle, drivers, opts)
         last = one
         -- the cost of every sample, passing or not: a rate says how often, this says how long
         taken[k] = type(one.result) == "table" and one.result.steps or nil
+        -- and every call a sample had refused or failed, passing or not: the sentence the
+        -- model read and the call that drew it, which is the work list for the cost of an
+        -- edit (docs/confidence-plan.md, item 4). A rate hides them; a step count only counts them.
+        for _, c in ipairs(type(one.result) == "table" and one.result.calls or {}) do
+          if c.refused or c.ok == false then
+            local keys = {}
+            for key in pairs(type(c.args) == "table" and c.args or {}) do keys[#keys + 1] = tostring(key) end
+            table.sort(keys)
+            refusals[#refusals + 1] = { sample = k, tool = tostring(c.tool), failed = c.ok == false or nil,
+              why = type(c.output) == "string" and c.output:gsub("%s+", " "):sub(1, 240) or "",
+              args = keys, op = type(c.args) == "table" and type(c.args.op) == "string" and c.args.op or nil }
+          end
+        end
         if one.outcome == "passed" then
           passes = passes + 1
         elseif #kept < 3 then
@@ -1094,6 +1107,7 @@ function behaviour.run(pickles, drivers, opts)
       last.failures = kept
       last.observations = seen
       last.taken = taken
+      last.refusals = refusals
       if reads and #reads > 0 then
         last.reads_script = reads
         last.reads_all = (thens or 0) > 0 and #reads == thens

@@ -420,6 +420,13 @@ Per scenario: samples, passes, the rate, and every failing sample kept whole —
 and its trace (`spec/trace.md`), which is what makes a failure diagnosable instead of
 merely counted. Per feature: the rates, and the scenarios that could not be evaluated.
 
+Every call a sample had refused or failed is kept on the scenario as `refusals`, passing
+samples included: the sample, the tool, the sentence the model read (240 characters), the
+argument names and the `op` when there is one. A rate hides a refusal the model recovered
+from and a step count only counts it; the sentences, grouped, are the work list for the
+cost of an edit (`docs/confidence-plan.md`, item 4), and `scripts/eval.lua` prints them
+grouped under each scenario with how many samples drew each.
+
 Beside every rate, its 95% Wilson interval (`behaviour.interval(passes, samples)`, kept on
 the scenario as `interval`; added 2026-09-12, `docs/confidence-plan.md` item 1): `3/3`
 prints as `3/3 (0.44-1.00)` and `9/10` as `9/10 (0.60-0.98)`, so a reader sees what three

@@ -517,6 +517,12 @@ function T.an_eval_drops_the_model_script_and_scores_a_rate()
   assert(#s.failures > 0, "a failing sample kept nothing")
   assert(s.failures[1].result ~= nil, "a failing sample kept no result")
   assert(type(s.failures[1].spans) == "table", "a failing sample kept no trace")
+  -- and every refused call of every sample, with the sentence the model read: the doubles
+  -- approve no one, so `file` is refused in each of the four samples
+  assert(#s.refusals == 4, #s.refusals .. " refusals kept")
+  assert(s.refusals[1].tool == "file" and s.refusals[1].sample == 1 and s.refusals[4].sample == 4)
+  assert(s.refusals[1].why ~= "" and s.refusals[1].args[1] == "text", s.refusals[1].why)
+  assert(#r.scenarios[1].refusals == 4 and s.interval[1] == 0, "kept on the scenario, beside the interval")
 end
 
 function T.a_scenario_that_only_scripts_a_model_is_not_evaluable_and_is_not_scored()
