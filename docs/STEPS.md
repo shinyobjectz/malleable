@@ -3,7 +3,7 @@
 GENERATED from `src/behaviour.lua` by `lua bin/malleable.lua --steps --heading > docs/STEPS.md`. Never hand-edited: an expression is added in one place, and this is a rendering of it.
 
 ```
-The built-in vocabulary: 86 expressions, version 1; the is phase, version 1.
+The built-in vocabulary: 87 expressions, version 1; the is phase, version 1.
 
 is -- the agent, in the Background
   the agent is called {word}                                 its name  (widens)
@@ -86,6 +86,7 @@ then -- the result
   it takes {int} step(s)                                     exactly this many passes of the loop
   it takes at most {int} step(s)                             no more passes than this
   the file {string} holds:                                   what the file holds after the run
+  the file {string} holds the line {string}                  one line of the file after the run, trimmed, exactly
   the file {string} holds the text kept as {word}            what the file holds after the run, as a text a history keeps
   the store {word} holds:                                    every row of the store after the run, in its order
   the store {word} has {int} row(s)                          how many rows the store holds after the run

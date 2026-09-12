@@ -665,7 +665,14 @@ function turn.run(agent, prompt, port, opts)
     if system_text then say { role = "system", text = system_text } end
     say_history()
     say { role = "user", text = prompt }
-    fire("start", { prompt = prompt, budget = budget, depth = depth })
+    -- `given`: the plain values on the port (strings, numbers, booleans), never a port: what a
+  -- feature's given lines put on the world for the run, which a hook may read at the start
+  -- (docs/spec/modes.md's kit reads the mode a scenario asked for). Data, copied.
+  local given = {}
+  for k, v in pairs(port) do
+    if type(v) == "string" or type(v) == "number" or type(v) == "boolean" then given[k] = v end
+  end
+  fire("start", { prompt = prompt, budget = budget, depth = depth, given = given })
     return finish("error",
       "this run is nested " .. depth .. " deep, past the limit of " .. max_depth .. ".",
       { where = "depth", message = "a run at depth " .. depth .. " is past max_depth " .. max_depth })
@@ -674,7 +681,14 @@ function turn.run(agent, prompt, port, opts)
   if system_text then say { role = "system", text = system_text } end
   say_history()
   say { role = "user", text = prompt }
-  fire("start", { prompt = prompt, budget = budget, depth = depth })
+  -- `given`: the plain values on the port (strings, numbers, booleans), never a port: what a
+  -- feature's given lines put on the world for the run, which a hook may read at the start
+  -- (docs/spec/modes.md's kit reads the mode a scenario asked for). Data, copied.
+  local given = {}
+  for k, v in pairs(port) do
+    if type(v) == "string" or type(v) == "number" or type(v) == "boolean" then given[k] = v end
+  end
+  fire("start", { prompt = prompt, budget = budget, depth = depth, given = given })
   for i = 1, #clash do
     note("the port key " .. q(clash[i]) .. " is a name the tool context reserves, and was not passed through")
   end

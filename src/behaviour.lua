@@ -475,6 +475,20 @@ step("the file {string} holds:", "then", "what the file holds after the run", fu
   if chomp(got) ~= chomp(c.doc) then return no("it holds %s", q(got)) end
 end)
 
+-- One line of a file, for a file too long to state whole: a feature an author edited, a log.
+step("the file {string} holds the line {string}", "then", "one line of the file after the run, trimmed, exactly",
+function (c)
+  local files = c.world and c.world.fs and c.world.fs.files
+  if not files then return no("this world has no filesystem") end
+  local got = files[c.args[1]]
+  if got == nil then return no("there is no file at %s", q(c.args[1])) end
+  local want = trim(c.args[2])
+  for l in (got .. "\n"):gmatch("(.-)\n") do
+    if trim(l) == want then return true end
+  end
+  return no("no line of %s reads %s", q(c.args[1]), q(want))
+end)
+
 step("the file {string} holds the text kept as {word}", "then",
   "what the file holds after the run, as a text a history keeps", function (c)
   if type(c.kept) ~= "function" then

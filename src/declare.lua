@@ -412,6 +412,8 @@ local KIT_LINE = "it uses the kit {string}"
 -- plan, and the text, so the kit is installed once at build and said back verbatim.
 local function kit_entry(name, e)
   return { expr = e.expr, covers = "kit", about = e.about .. " (the kit " .. name .. ")", reach = e.reach, kit = name,
+    gate = e.gate == true or nil,     -- a line an agent may add and never remove or replace, like `asks first`
+    narrower = e.narrower,            -- (old args, new args) -> true when the new line narrows further
     apply = function (p, s, ...)
       local k = p.kits[name]
       if not k then
@@ -513,7 +515,7 @@ function declare.vocabulary()
   for _, name in ipairs(kits.order) do
     for _, e in ipairs(kits.registered[name].is) do
       out[#out + 1] = { expr = e.def.expr, phase = "is", about = e.def.about .. " (the kit " .. name .. ")",
-                        reach = e.def.reach, covers = "kit", kit = name }
+                        reach = e.def.reach, covers = "kit", kit = name, gate = e.def.gate == true or nil }
     end
   end
   return out
@@ -524,12 +526,18 @@ end
 --- Load a kit for the process: check its shape, compile its lines against the vocabulary,
 --- refuse a collision by name, and register it. Answers the kit's name, or `nil, sentence`.
 --- `from` is the file it came from, when it did; loading the same file again is nothing.
-function declare.kit(def, from)
+function declare.kit(def, from, text)
   local ok, why = kits.define(def)
   if not ok then return nil, why end
   local have = kits.registered[def.name]
   if have then
-    if have.def == def or (from ~= nil and have.from == from) then return def.name end
+    -- the same table, the same file, or the same text under another path: nothing to do.
+    -- Two agents in one folder both say `it uses the kit "modes.lua"`, and an eval's author
+    -- reads the tree's copy while the file it edits reads the workspace's (2026-09-12).
+    local function plain(t) return type(t) == "string" and (t:gsub("\r\n", "\n"):gsub("%s+$", "")) or nil end
+    if have.def == def or (from ~= nil and have.from == from) or (text ~= nil and plain(have.text) == plain(text)) then
+      return def.name
+    end
     return nil, string.format("the kit %s is already loaded from %s, and this is another, from %s",
       def.name, have.from and q(have.from) or "Lua", from and q(from) or "Lua")
   end
@@ -568,7 +576,7 @@ function declare.kit(def, from)
     end
     steps[i] = { expr = ex, def = st }
   end
-  kits.registered[def.name] = { def = def, from = from, is = is, steps = steps }
+  kits.registered[def.name] = { def = def, from = from, text = text, is = is, steps = steps }
   kits.order[#kits.order + 1] = def.name
   kits.version = kits.version + 1
   return def.name
@@ -609,7 +617,7 @@ local function load_kits(doc, opts)
       if not text then return at(st.line, "cannot read %s: %s", q(path), tostring(why)) end
       local def, bad = compile_kit(text, path)
       if def == nil then return at(st.line, "%s: %s", q(path), tostring(bad)) end
-      local name, bad2 = declare.kit(def, path)
+      local name, bad2 = declare.kit(def, path, text)
       if not name then return at(st.line, "%s: %s", q(path), tostring(bad2)) end
     end
   end
@@ -1373,6 +1381,12 @@ local function reach_of_replace(old, new)
     return nil, GATE_WHY
   end
   if old.def.expr == new.def.expr then
+    -- a kit's narrowing line may say when another value of it is narrower still: a mode's
+    -- tool list shortened is a narrowing, where a glob or a limit changed is not (docs/spec/kit.md)
+    if old.def.reach == "narrows" and type(old.def.narrower) == "function" then
+      local ok, is_narrower = pcall(old.def.narrower, old.args, new.args)
+      if ok and is_narrower == true then return "narrows" end
+    end
     local names_same, i = true, 0
     for _, seg in ipairs(old.e.segs) do
       if seg.kind == "param" then

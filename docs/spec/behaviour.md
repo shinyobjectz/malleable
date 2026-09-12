@@ -144,6 +144,7 @@ refused. It is the one `When` that reaches no port at all.
 | `it takes at most {int} step(s)` | `result.steps` |
 | `no beat is due` | after `the clock strikes`: nothing ran, every beat held or not yet due |
 | `the file {string} holds:` + doc string | the world's `fs`, after |
+| `the file {string} holds the line {string}` | the world's `fs`, after: one line of it, trimmed, exactly (added 2026-09-12 for a file an author edited, too long to state whole) |
 | `nothing is written` | the world's `fs`, after |
 | `it notes {string}` | `result.notes`, containing |
 | `the declaration is sound` | `agent.check` answered true |

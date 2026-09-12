@@ -169,6 +169,12 @@ records or the next step. This is what makes "hooks observe" and "`args` as vali
 mechanical rather than a promise — a `call` hook fires after validation and before the
 gate, which is exactly where a swapped path would do the most damage.
 
+**The `start` payload carries `given`** (amended 2026-09-12): the plain values on the
+port, strings, numbers and booleans, copied, and never a port. It is what a feature's
+given lines put on the world for the run, which is the one thing a hook that keeps state
+for a run has to be handed at the start rather than remember from a scenario that ran
+nothing (`docs/spec/modes.md`, the kit's corrections).
+
 **A hook may say no. It may not say "yes, but different".** The invariant above is about
 MUTATION: a hook cannot rewrite an approved call, because it never holds the table the
 call will be made with. A VETO removes a call rather than rewriting one, and breaks

@@ -72,7 +72,14 @@ Rules of the shape, each refused by name at load:
 
 * `name` is a word; `about` is a sentence.
 * `is` holds at least one entry; each has an `expr` that compiles (`docs/spec/gherkin.md`),
-  a `reach` of widens, narrows or neither, an `about`, and a `tells` function. An
+  a `reach` of widens, narrows or neither, an `about`, a `tells` function, and may say
+  `gate = true`: a line an agent may add and never remove or replace, as `asks first` is
+  (added 2026-09-12 for the modes kit's start line, whose replacement is a widening the
+  reach words cannot score). A narrowing line may also give `narrower(old, new)`, a
+  function of the two lines' arguments answering true when the new line narrows further:
+  the wall otherwise scores any replacement of a narrowing line as a widening, which is
+  right for a glob or a limit and wrong for a list a mode shortens (found by the real-model
+  attack run, 2026-09-12: the author could not take one tool out of a mode). An
   expression that reads as a built-in line, an is line, or a line of another loaded kit
   is refused, naming both.
 * `install` is a function of `(told, agent)`, where `agent` is the declaration surface
@@ -108,7 +115,10 @@ avoid.)
 
 A loaded kit stays loaded for the process, by name. Loading a second kit with the same name
 from a different file is refused, naming both files: two workspaces that each call their
-kit `calendar` are two processes. Loading the same file again is nothing.
+kit `calendar` are two processes. Loading the same file again is nothing, and so is loading
+the same text from another path (amended 2026-09-12: two agents in one folder say the same
+kit by the same relative path, and an eval's author reads the tree's copy while the file it
+edits reads the workspace's; the text is what makes a kit the same, trailing whitespace and line endings aside: a doc string drops the final newline the file has).
 
 ## Using one
 

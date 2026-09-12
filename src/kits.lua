@@ -95,6 +95,12 @@ function kits.define(def)
     if type(e.tells) ~= "function" then
       return nil, string.format("the kit %s: the line %q needs `tells = function (told, ...) end`", name, e.expr)
     end
+    if e.narrower ~= nil and type(e.narrower) ~= "function" then
+      return nil, string.format("the kit %s: the line %q: `narrower` is a function of the old and the new arguments", name, e.expr)
+    end
+    if e.gate ~= nil and type(e.gate) ~= "boolean" then
+      return nil, string.format("the kit %s: the line %q: `gate` is true or false", name, e.expr)
+    end
   end
   if type(def.install) ~= "function" then
     return nil, "the kit " .. name .. " needs `install = function (told, agent) ... end`"

@@ -37,7 +37,7 @@ Checked with `monty onto check`: `mode` and `modes` were free.
 
 | | tells the kit | reach |
 | --- | --- | --- |
-| `it starts in the mode {word}` | the start | neither |
+| `it starts in the mode {word}` | the start | neither, and a **gate**: never removed or replaced by an agent |
 | `in the mode {word} it may call {string}` | that mode's tools, a comma list | narrows |
 | `the mode {word} moves to {word} when the person says so` | one move | widens |
 
@@ -70,7 +70,11 @@ where the model reads it at the moment it matters.
 | `the run begins in the mode {word}` (given) | the mode the next run starts in, instead of the start |
 
 The mode a run is in is the kit's own state for the run, kept in the kit and reset by the
-`start` hook; a Then line reads it after the run, as it reads the result.
+`start` hook; a Then line reads it after the run, as it reads the result. The given line
+puts `mode` on the scenario's world, and the `start` hook reads it from `e.given`, the
+plain values a run's port carries (amended 2026-09-12: the first draft kept the asked-for
+start in the kit, and a scenario that asked and then ran nothing, `the declaration is
+loaded`, leaked it into the next scenario's run; `turn` now hands a hook the world's data).
 
 ## Why the person, and only the person
 
@@ -103,4 +107,14 @@ itself would be a mode the model could move.
 
 ## Corrections, made while building it
 
-(none yet)
+* The start line is a gate (`docs/spec/kit.md`): replacing `reading` with `editing` was a
+  "neither" edit by the reach words and a widening in fact.
+* `the run begins in the mode` leaked across scenarios (above); fixed through `e.given`.
+* Under `its trust is trusted`, or `it may always call mode`, the model moves itself: the
+  mode is then a sentence. Under `it may never call mode` the run is pinned in its start.
+  A delegate does not inherit the parent's mode. All four are stated as features under
+  `evals/modes-*.feature` rather than hidden.
+* The mode was one variable for the whole kit, so a `verify` the author ran on the
+  notebook, which uses the same kit, put the author back in reading (found by the
+  real-model attack run: an approved move undone by the next verify). The state is now
+  per use, in the install's closure; a Then line reads the use whose run started last.

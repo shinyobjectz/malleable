@@ -83,7 +83,9 @@ local function did(result)
   if type(result) ~= "table" then return "?" end
   local parts = {}
   for _, c in ipairs(result.calls or {}) do
-    parts[#parts + 1] = c.tool .. (c.refused and " (refused)" or (c.ok == false and " (failed)" or ""))
+    local why = (c.refused or c.ok == false) and type(c.output) == "string"
+      and (" " .. c.output:gsub("%s+", " "):sub(1, 90)) or ""
+    parts[#parts + 1] = c.tool .. (c.refused and " (refused" .. why .. ")" or (c.ok == false and " (failed" .. why .. ")" or ""))
   end
   return string.format("stop=%s steps=%d calls=[%s]%s", tostring(result.stop), result.steps or 0, table.concat(parts, ", "),
     result.stop ~= "answered" and result.reason and ("  " .. tostring(result.reason):gsub("%s+", " "):sub(1, 200)) or "")

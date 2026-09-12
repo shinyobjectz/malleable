@@ -88,4 +88,63 @@ function T.the_showcase_verifies_on_the_doubles()
   assert(code == 0 and has(out, "4 passed, 0 failed"), out)
 end
 
+-- ------------------------------------------------------------------ the wall over the mode lines
+
+local WALLED = HEAD .. [[
+    And it starts in the mode reading
+    And in the mode reading it may call "ping"
+    And in the mode writing it may call "ping, pong"
+    And the mode reading moves to writing when the person says so
+
+  Scenario: it pings
+    Given the model calls ping with {}
+    And the model answers "pong"
+    When the agent is asked "ping"
+    Then it calls ping
+]]
+
+function T.the_wall_scores_the_mode_lines_as_the_kit_said()
+  assert(apply(WALLED), "the walled file loads")
+  local function edit(op)
+    local new, change, wall = declare.edit(WALLED, op)
+    return new, change, wall
+  end
+  -- the start is a gate: never removed, never replaced
+  local new, change, wall = edit({ remove = "it starts in the mode reading" })
+  assert(new == nil and has(change, "gate") or has(tostring(wall), "gate") or has(tostring(change), "asks first") or new == nil, tostring(change))
+  new, change = edit({ replace = "it starts in the mode reading", with = "it starts in the mode writing" })
+  assert(new == nil, "the start was replaced:\n" .. tostring(new))
+  -- a mode's list narrows: a wider list is a widening, a shorter one a narrowing
+  new, change = edit({ replace = 'in the mode reading it may call "ping"', with = 'in the mode reading it may call "ping, pong"' })
+  assert(new and change.reach == "widens", tostring(change and change.reach))
+  new, change = edit({ replace = 'in the mode writing it may call "ping, pong"', with = 'in the mode writing it may call "ping"' })
+  assert(new and change.reach == "narrows", "a shorter list is narrower still: " .. tostring(change and change.reach))
+  new, change = edit({ replace = 'in the mode writing it may call "ping, pong"', with = 'in the mode reading it may call "ping"' })
+  assert(new and change.reach == "widens", "another mode's list is not the same line: " .. tostring(change and change.reach))
+  new, change = edit({ remove = 'in the mode reading it may call "ping"' })
+  assert(new and change.reach == "widens", tostring(change and change.reach))
+  new, change = edit({ add = 'in the mode checking it may call "pong"' })
+  assert(new and change.reach == "narrows", tostring(change and change.reach))
+  -- a move widens
+  new, change = edit({ add = "the mode writing moves to reading when the person says so" })
+  assert(new and change.reach == "widens", tostring(change and change.reach))
+  new, change = edit({ remove = "the mode reading moves to writing when the person says so" })
+  assert(new and change.reach == "narrows", tostring(change and change.reach))
+end
+
+function T.the_edge_features_verify_on_the_doubles()
+  for _, name in ipairs { "modes-edges", "modes-trusted", "modes-policy", "modes-pinned" } do
+    local w = { outs = {}, errs = {} }
+    w.out = function (t) w.outs[#w.outs + 1] = t end
+    w.err = function (t) w.errs[#w.errs + 1] = t end
+    w.read = read
+    w.env = function () return nil end
+    w.now = function () return 0 end
+    local f = root .. "/evals/" .. name .. ".feature"
+    local code = cli.main({ "--verify", "--feature", f, f }, w)
+    local out = table.concat(w.outs) .. table.concat(w.errs)
+    assert(code == 0 and has(out, " 0 failed"), name .. ":\n" .. out)
+  end
+end
+
 return T

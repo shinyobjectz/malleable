@@ -127,6 +127,7 @@ end
 -- included (docs/spec/agent-file.md). Both are put there from console/agents/ the first
 -- time. Answers the surface, the path of the file shown, and the workers by name.
 local SEEDS = { "notebook", "author", "reader" }     -- put in the workspace the first time
+local KIT_SEEDS = { ["modes.lua"] = "library/modes.lua" }   -- the kits the seeded agents use (docs/spec/modes.md)
 local WORKERS = { "notebook", "author" }             -- the talker's own; the reader is the notebook's delegate
 
 local function load_agent(o, dir)
@@ -138,6 +139,13 @@ local function load_agent(o, dir)
     if not read_file(path) then
       local seed = archive and love.filesystem.read("console/agents/" .. name .. ".feature")
                    or read_file(root .. "/console/agents/" .. name .. ".feature")
+      if seed then mkdir(folder); write_file(path, seed) end
+    end
+  end
+  for name, source in pairs(KIT_SEEDS) do
+    local path = folder .. "/" .. name
+    if not read_file(path) then
+      local seed = archive and love.filesystem.read(source) or read_file(root .. "/" .. source)
       if seed then mkdir(folder); write_file(path, seed) end
     end
   end

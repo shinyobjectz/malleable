@@ -123,6 +123,7 @@ Feature: t
     And it keeps a calendar
 ]]))
   assert(a.tools.book, "not installed")
+  -- the same text under another path is the same kit; other text under the name is another
   local b, why = apply([[
 Feature: t
   Background:
@@ -131,7 +132,16 @@ Feature: t
     And it uses the kit "other/calendar.lua"
     And it keeps a calendar
 ]], { ["other/calendar.lua"] = CALENDAR })
-  assert(b == nil and has(why, "already loaded from") and has(why, "kits/calendar.lua") and has(why, "other/calendar.lua"), tostring(why))
+  assert(b and b.tools.book, tostring(why))
+  local c, why2 = apply([[
+Feature: t
+  Background:
+    Given the agent is called t
+    And its model is "test:model"
+    And it uses the kit "other/calendar.lua"
+    And it keeps a calendar
+]], { ["other/calendar.lua"] = (CALENDAR:gsub("one event a row", "one booking a row")) })
+  assert(c == nil and has(why2, "already loaded from") and has(why2, "kits/calendar.lua") and has(why2, "other/calendar.lua"), tostring(why2))
 end
 
 function T.a_scenario_says_the_world_with_the_kits_step_and_reads_it_with_the_other()

@@ -33,22 +33,40 @@ local function mode_of(told, name, line)
   return m
 end
 
--- The kit's state for the run: the mode it is in, and a start a given line asked for.
-local current, forced = nil, nil
+-- The state is PER USE, in the install's closure: two agents in one process that both use
+-- the kit (an author and the file it verifies) each keep their own mode, and a verify the
+-- author runs on the notebook does not move the author. A start a given line asked for
+-- rides on the world as `mode` and reaches the start hook as `e.given.mode`, so nothing
+-- leaks from a scenario that ran nothing into the next run. `last` is the use whose run
+-- started most recently, which is the one a Then line reads.
+local last = nil
 
 return {
   name  = "modes",
   about = "a state machine over what the agent may call, moved only by the person",
 
   is = {
-    { expr = "it starts in the mode {word}", reach = "neither",
-      about = "the mode every run begins in",
+    -- a gate: an agent may add the start and never remove or replace it, or a self-edit
+    -- from reading to editing would be a widening the wall scores as nothing
+    { expr = "it starts in the mode {word}", reach = "neither", gate = true,
+      about = "the mode every run begins in; never removed or changed by an agent",
       tells = function (told, name)
         if told.start then error("the start is said twice: " .. told.start .. " and " .. name, 0) end
         told.start = name
       end },
     { expr = "in the mode {word} it may call {string}", reach = "narrows",
       about = "the tools that mode may call, a comma list; every other call is refused",
+      -- the same mode with fewer tools is narrower still, so the wall lets an agent shorten
+      -- its own list without a proposal (and never lengthen it)
+      narrower = function (old, new)
+        if old[1] ~= new[1] then return false end
+        local had = {}
+        for _, t in ipairs(split(old[2])) do had[t] = true end
+        local list = split(new[2])
+        if #list == 0 then return false end
+        for _, t in ipairs(list) do if not had[t] then return false end end
+        return true
+      end,
       tells = function (told, name, list)
         local m = mode_of(told, name)
         if m.list then error("the mode " .. name .. " is declared twice", 0) end
@@ -96,15 +114,18 @@ return {
     end
 
     local function tools_of(name) return table.concat(modes[name].list, ", ") end
+    local use = { current = nil }
 
-    agent.on("start", function ()
-      current = forced or told.start
-      forced = nil
+    agent.on("start", function (e)
+      local asked = type(e) == "table" and type(e.given) == "table" and e.given.mode or nil
+      use.current = (asked and modes[asked] and asked) or told.start
+      last = use
       return nil
     end)
 
     agent.on("call", function (e)
       if e.tool == "mode" then return nil end
+      local current = use.current
       local m = current and modes[current]
       if m and not m.allowed[e.tool] then
         return { allow = false, why = "in the mode " .. current .. " it may call only " .. tools_of(current)
@@ -127,7 +148,7 @@ return {
       args = { to = one_of(choices) },
       run = function (c)
         local to = c.args.to
-        local from = current or told.start
+        local from = use.current or told.start
         if not modes[to] or not modes[to].list then return nil, "there is no mode " .. tostring(to) end
         if to == from then return "already in the mode " .. to .. "; it may call " .. tools_of(to) end
         if not modes[from].moves[to] then
@@ -135,7 +156,7 @@ return {
           return nil, "from the mode " .. from .. " it may move to " .. (#can > 0 and table.concat(can, " or ") or "nothing")
             .. ", not to " .. to
         end
-        current = to
+        use.current = to
         return "in the mode " .. to .. "; it may call " .. tools_of(to)
       end,
     })
@@ -143,9 +164,10 @@ return {
 
   steps = {
     { expr = "the run begins in the mode {word}",
-      given = function (c) forced = c.args[1] end },
+      given = function (c) c.world.mode = c.args[1] end },
     { expr = "it is in the mode {word}",
       then_ = function (c)
+        local current = last and last.current
         if current ~= c.args[1] then return false, "it is in the mode " .. tostring(current) end
       end },
   },
@@ -155,7 +177,9 @@ return {
     if told.start then out[#out + 1] = "it starts in the mode " .. told.start end
     for _, n in ipairs(told.order or {}) do
       local m = told.modes[n]
-      if m.list then out[#out + 1] = "in the mode " .. n .. " it may call \"" .. table.concat(m.list, ", ") .. "\"" end
+      -- single quotes on purpose: this file is also carried inside a feature's doc string,
+      -- where a backslash before a quote is read as an escape and the text changes
+      if m.list then out[#out + 1] = 'in the mode ' .. n .. ' it may call "' .. table.concat(m.list, ", ") .. '"' end
     end
     for _, mv in ipairs(told.moves or {}) do
       out[#out + 1] = "the mode " .. mv.from .. " moves to " .. mv.to .. " when the person says so"

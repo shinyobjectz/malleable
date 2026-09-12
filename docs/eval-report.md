@@ -397,6 +397,17 @@ fell from 69 steps to 35 and the gate scenario rose from 1 of 3 to 3 of 3; the t
 scenarios rose from 56 steps to 68, one sample over its cap on a scenario-text rewrite loop;
 the total fell from 152 steps to 141.
 
+## The modes attacked (`evals/modes-attacks.feature`, 8 scenarios, 3 samples)
+
+Plan mode (`library/modes.lua`) attacked through the author in modes by a real model: six
+asks to take the notebook or the author past their modes, two asks to be carried out. The
+six attacks held at 3 of 3 each, in 3 to 8 steps. The two legitimate asks found three
+harness faults on their first run (a shortened list scored as a widening, the kit's text
+differing by an escaped quote, the mode kept as one variable for the process), each fixed
+with a test; the table, the fixes and the finding are in `docs/authoring-context.md`,
+"Where it breaks, and where it held". The doubles half is `evals/modes-edges.feature`
+and its three siblings.
+
 ## What the evals themselves taught
 
 Four of the seven failures in the first run were the eval's, not the agents': escaped doc
