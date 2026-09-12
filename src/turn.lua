@@ -14,19 +14,16 @@ end)()
 
 local turn = {}
 
--- ---------------------------------------------------------------- small helpers
+-- small helpers
 
 local STOPS = { "answered", "budget", "refused", "error" }
 
 -- The four outcomes, forever. A caller branches on `result.stop`, never on `reason`.
 --
--- `turn.stops` is not a stored table but a fresh one on every read, carrying a
--- metatable that raises on a new key. Growing the list is loud; overwriting one of the
--- four is silent but lands in a copy nobody else will ever see. A stored table cannot
--- do both: `__newindex` does not fire for a key that is already there, and the proxy
--- that would fix that needs `__len`, which LuaJIT does not honour on a table. So the
--- list is rebuilt instead, and one caller can no longer corrupt the constant that every
--- other caller reads. `#`, `ipairs` and `table.concat` all work on it as they look.
+-- `turn.stops` is rebuilt on every read, with a metatable that raises on a new key, so
+-- growing the list is loud and overwriting one of the four lands in a copy nobody else
+-- sees. A stored table cannot do both: `__newindex` does not fire for an existing key, and
+-- the proxy that would fix it needs `__len`, which LuaJIT does not honour on a table.
 setmetatable(turn, {
   __index = function (_, k)
     if k ~= "stops" then return nil end
@@ -87,10 +84,9 @@ local function output_of(v)
   return "(the tool returned a " .. t .. ", not text)"
 end
 
--- A copy of anything handed outward — to a hook, to the gate, to a tool body, to the
--- model port. Nothing done to a copy can reach the run's own record, which is what
--- makes "hooks observe" and "args as validated" true rather than promised. Cycle-safe.
--- Metatables are dropped: a copy that inherited __index would hand the original back.
+-- A copy of anything handed outward -- to a hook, the gate, a tool body, the model port --
+-- so nothing done to it reaches the run's own record. Cycle-safe. Metatables are dropped:
+-- a copy that inherited __index would hand the original back.
 local function copy(v, seen)
   if type(v) ~= "table" then return v end
   seen = seen or {}
@@ -137,12 +133,20 @@ local function check_args(tool, raw)
       if p.kind == "array" then good = is_list(v)
       elseif p.kind == "object" then good = type(v) == "table"
       else good = type(v) == p.kind end
-      if good then
+      if good and p.choices then
+        good = false
+        for c = 1, #p.choices do if p.choices[c] == v then good = true end end
+        if not good then
+          faults[#faults + 1] = "the argument " .. q(k) .. " is one of " .. table.concat(p.choices, ", ")
+            .. ", and arrived as " .. q(tostring(v))
+        end
+      elseif good then
         out[k] = v
       else
         faults[#faults + 1] = "the argument " .. q(k) .. " must be "
           .. (KIND_TEXT[p.kind] or p.kind) .. ", and arrived as " .. type(v)
       end
+      if good and p.choices then out[k] = v end
     end
   end
   local extra = {}
@@ -163,11 +167,9 @@ local function check_args(tool, raw)
   return out, faults
 end
 
--- The approval gate answers in one of two shapes, and this reads both. spec/port.md
--- says a decision is { allow = boolean, why = string|nil }; spec/turn.md wrote it as
--- one of three strings. A stop — end the whole run, not just this call — is
--- decision.stop == true in the table form and "stop" in the string form.
--- Anything else is a deny, because a gate that misbehaves must fail closed.
+-- The gate answers in either shape: { allow = boolean, why = string|nil } (spec/port.md)
+-- or one of three strings (spec/turn.md). A stop -- end the whole run, not just this call
+-- -- is `stop = true` or "stop". Anything else denies: a misbehaving gate fails closed.
 local function read_decision(v)
   local t = type(v)
   if t == "string" then
@@ -210,7 +212,7 @@ end
 local RESERVED = { args = true, step = true, call = true, agent = true, depth = true,
                    note = true, nested = true, acted = true }
 
--- ------------------------------------------------------------------ validation
+-- validation
 
 local OPT_NUMBERS = {
   budget = 1, calls_per_step = 1, malformed_limit = 1, depth = 0, max_depth = 0,
@@ -267,7 +269,7 @@ function turn.check(agent, port, opts)
       local unknown = {}
       for k in pairs(opts) do
         if not (OPT_NUMBERS[k] or k == "id" or k == "system" or k == "tracer"
-                or k == "run_span" or k == "notes") then unknown[#unknown + 1] = tostring(k) end
+                or k == "run_span" or k == "notes" or k == "history") then unknown[#unknown + 1] = tostring(k) end
       end
       table.sort(unknown)
       for i = 1, #unknown do
@@ -289,10 +291,25 @@ function turn.check(agent, port, opts)
       if opts.system ~= nil and type(opts.system) ~= "string" then
         p[#p + 1] = "opts.system is a string, and arrived as " .. type(opts.system)
       end
-      -- A caller that started the run before the loop did: it holds the recorder, it
-      -- opened the run's own span, and it may already have made notes about the run.
-      -- All three are checked for shape here rather than trusted, because a half-built
-      -- recorder would fail in the middle of a run instead of before one.
+      -- The conversation so far (spec/speech.md). Checked for shape only: whether a tool
+      -- message answers a call is the caller's pairing to keep, and the far side says so.
+      if opts.history ~= nil then
+        if not is_list(opts.history) then
+          p[#p + 1] = "opts.history is a list of messages, and arrived as " .. type(opts.history)
+        else
+          for i = 1, #opts.history do
+            local m = opts.history[i]
+            if type(m) ~= "table" or not (m.role == "user" or m.role == "agent" or m.role == "tool") then
+              p[#p + 1] = "opts.history[" .. i .. "] is a user, agent or tool message"
+            elseif type(m.text) ~= "string" then
+              p[#p + 1] = "opts.history[" .. i .. "] has no text"
+            end
+          end
+        end
+      end
+      -- A caller that started the run before the loop holds the recorder, opened the
+      -- run's span, and may already have made notes. All three are shape-checked here, so
+      -- a half-built recorder fails before the run rather than during it.
       if opts.tracer ~= nil then
         if type(opts.tracer) ~= "table" then
           p[#p + 1] = "opts.tracer is a recorder from turn.recorder, and arrived as " .. type(opts.tracer)
@@ -332,26 +349,19 @@ function turn.check(agent, port, opts)
   return #p == 0, p
 end
 
--- ------------------------------------------------------------------- the run
+-- the run
 
--- ------------------------------------------------------------------------ the trace
+-- The trace. A turn holds steps, a step holds a model call and the tool calls it asked
+-- for, a tool call may hold a question put to a human. `result.spans` is complete; the
+-- same records also go out through the log port as they happen, and that half stays lossy.
 --
--- A run records its own tree -- a turn holds steps, a step holds a model call and the tool
--- calls it asked for, a tool call may hold a question put to a human -- and the record is
--- a FACT ABOUT THE RESULT, not a favour from a sink. `result.spans` is complete and
--- nothing drops it; the same records also go out through the log port as they happen, for
--- a host that wants a live view, and that half stays lossy exactly as `spec/port.md` says.
+-- The recorder is here rather than in `src/trace.lua` because this file may require only
+-- the declaration surface (rule 1). `trace.lua` renders what this produces and knows
+-- nothing about a run.
 --
--- The recorder is HERE rather than in `src/trace.lua` because this file's own header says
--- the only module it may require is the declaration surface, and a trace is not worth
--- weakening that for. `trace.lua` renders what this produces -- to a wire format as a
--- string, or to a tree for a person -- and knows nothing about a run. Which format, and
--- whose, is that file's business: naming one here is what rule 1 forbids.
---
--- Rule 8 lives here too, by construction: every value written below is a name, a count, a
--- duration or a term from a closed set. Never a prompt, a model's text, a file's contents,
--- a tool's arguments or its output. A trace exporter's whole job is to send what it is
--- given somewhere else.
+-- Rule 8 holds by construction: every value written below is a name, a count, a duration
+-- or a term from a closed set -- never a prompt, a model's text, a file's contents, a
+-- tool's arguments or its output.
 --
 -- Contract: spec/trace.md.
 local function recorder(clock, log, depth)
@@ -392,13 +402,10 @@ local function recorder(clock, log, depth)
     end
   end
 
-  -- A finished tree from somewhere else, hung under a span of this one.
-  --
-  -- Copies. The ids are re-stamped from this recorder's own counter and the parents
-  -- remapped with them, so two runs that both numbered their spans `"1"` cannot collide
-  -- and a child cannot name a parent it was never given. Times are taken verbatim: the
-  -- child read the same clock port, so its `at` is comparable with this run's without
-  -- being re-derived.
+  -- A finished tree from elsewhere, hung under a span of this one. Copies: ids are
+  -- re-stamped from this recorder's counter and parents remapped with them, so two runs
+  -- that both numbered a span `"1"` cannot collide. Times are verbatim -- the child read
+  -- the same clock port.
   function r.adopt(spans, parent)
     if type(spans) ~= "table" then return end
     local mapped = {}
@@ -423,12 +430,11 @@ local function recorder(clock, log, depth)
     end
   end
 
-  -- Sweep what is still open, and mark it. `from` bounds the sweep to spans opened at or
-  -- after that id, so a caller that opened a span BEFORE handing the recorder over --
-  -- `agent.tick` around a beat, a delegating turn around a child run -- still holds its
-  -- own and closes it itself. Without the bound, the first run to finish would mark every
-  -- span above it unclosed, which is the tracer reporting its own bookkeeping as a fault
-  -- in the run.
+  -- Sweep what is still open and mark it. `from` bounds the sweep to spans opened at or
+  -- after that id, so a caller that opened one BEFORE handing the recorder over --
+  -- `agent.tick` around a beat, a delegating turn around a child run -- still closes its
+  -- own. Without the bound, the first run to finish would mark every span above it
+  -- unclosed.
   function r.close_all(from)
     local floor = tonumber(from) or 0
     for id, span in pairs(r.open) do
@@ -447,16 +453,13 @@ end
 --- A recorder, for a caller that starts a run and wants what happens BEFORE the loop on
 --- the same tree — a skill catalogued, a server connected, a beat firing.
 ---
---- Handed out rather than kept private, and handed out from HERE rather than from
---- `src/trace.lua`, for the reason this file's header gives: the only module it may
---- require is the declaration surface, and a recorder in another file would make it
---- require that one too. `turn.run` still makes its own when nobody hands it one, so a
---- host that calls the loop directly is unchanged and is still handed a whole tree.
+--- Handed out from here rather than `src/trace.lua`, because the only module this file may
+--- require is the declaration surface. `turn.run` still makes its own when nobody hands it
+--- one.
 ---
---- What a caller gets is three functions and a list. It is not a capability a tool body
---- may hold: rule 8 is enforced by `trace.allowed` over the attributes, and a body that
---- could open a span could write a name the vocabulary never agreed to. `agent.lua` holds
---- one; nothing reachable from a tool does.
+--- Three functions and a list. Not a capability a tool body may hold: a body that could
+--- open a span could write a name the vocabulary never agreed to (rule 8). `agent.lua`
+--- holds one; nothing reachable from a tool does.
 turn.recorder = recorder
 
 function turn.run(agent, prompt, port, opts)
@@ -494,17 +497,14 @@ function turn.run(agent, prompt, port, opts)
     result.notes[#result.notes + 1] = s
   end
 
-  -- Notes the caller already made about this run, in front of the ones the run makes. A
-  -- server that was never reached is a fact about the whole run and not about the step
-  -- that noticed, and arriving here rather than being spliced on afterwards is what makes
-  -- `malleable.notes` count them.
+  -- Notes the caller already made, in front of the run's own. A server that was never
+  -- reached is a fact about the whole run, and arriving here rather than being spliced on
+  -- afterwards is what makes `malleable.notes` count them.
   for i = 1, #(opts.notes or {}) do result.notes[i] = opts.notes[i] end
 
-  -- The recorder is the caller's when the caller started the run before the loop did.
-  -- `agent.run` does: it catalogues skills and connects servers first, and those are part
-  -- of invoking this agent rather than a separate tree beside it. The span the loop hangs
-  -- its steps under is then the caller's too, and the loop still CLOSES it, because what
-  -- a run amounts to — how it stopped, how many steps, how many calls — is only known
+  -- The recorder is the caller's when the caller started the run first, as `agent.run`
+  -- does. The span the loop hangs its steps under is then the caller's too, and the loop
+  -- still CLOSES it: how a run stopped, and in how many steps and calls, is only known
   -- here (spec/trace.md, "The spans").
   local tracer = opts.tracer or recorder(port.clock, port.log, depth)
   result.spans = tracer.spans
@@ -521,15 +521,12 @@ function turn.run(agent, prompt, port, opts)
   -- A hook may say NO. It may not say "yes, but different".
   --
   -- The copy handed to a hook is what makes "hooks observe" mechanical: an observer cannot
-  -- swap an approved path for another between validation and the gate. A VETO breaks none
-  -- of that — it removes a call rather than rewriting one — so a hook that returns a
-  -- refusal is honoured, and the refusal becomes a result the model reads, exactly as the
-  -- approval gate's does (rule 4).
+  -- swap an approved path for another between validation and the gate. A VETO removes a
+  -- call rather than rewriting one, so a hook's refusal is honoured and becomes a result
+  -- the model reads (rule 4).
   --
-  -- Anything else a hook returns is REFUSED LOUDLY. Before this, every return was silently
-  -- discarded, so `return { stop = "never more than three" }` read as a declared limit and
-  -- was not one — the highest-severity kind of failure, because it looks like success
-  -- (mar-43fv).
+  -- Anything else a hook returns is REFUSED LOUDLY, never silently discarded: a return
+  -- like `{ stop = "never more than three" }` would otherwise read as a declared limit.
   local function veto_of(event, v)
     if v == nil then return nil end
     if type(v) == "table" then
@@ -583,9 +580,8 @@ function turn.run(agent, prompt, port, opts)
   end
 
   -- The system message. `opts.system` replaces the declaration's, and is how anything
-  -- composed at run time reaches the model without this file learning what it is: the
-  -- skills briefing is the first such thing (spec/skills.md), and the alternative was a
-  -- dependency from the core onto a subsystem, which rule 1 does not allow.
+  -- composed at run time -- the skills briefing, for one -- reaches the model without this
+  -- file learning what it is, which rule 1 does not allow.
   local system_text = type(agent.system) == "string" and agent.system or nil
   if opts and type(opts.system) == "string" then system_text = opts.system end
 
@@ -608,34 +604,32 @@ function turn.run(agent, prompt, port, opts)
     return result
   end
 
-  -- The context a tool body is handed. Rule 4 made mechanical: the model and the
-  -- gate are withheld, so a tool can neither approve itself nor spend the budget.
-  -- Worked out once for the whole run: `model` and `ask` withheld, because rule 4 says
-  -- a tool body cannot approve itself or spend the budget, and the six names the context
-  -- reserves withheld too. A clash is one note per run, not one per call.
+  -- The context a tool body is handed, worked out once for the whole run. Rule 4 made
+  -- mechanical: `model` and `ask` are withheld so a tool can neither approve itself nor
+  -- spend the budget, and the six names the context reserves are withheld too. A clash is
+  -- one note per run, not one per call.
   local passthrough, clash = {}, {}
   for k, v in pairs(port) do
-    if k ~= "model" and k ~= "ask" then
+    -- A history that can write is authority too (docs/spec/history.md): a tool body gets it
+    -- only as the view that reads.
+    local writer = k == "history" and type(v) == "table" and v.write ~= nil
+    if k ~= "model" and k ~= "ask" and not writer then
       if RESERVED[k] then clash[#clash + 1] = tostring(k) else passthrough[k] = v end
     end
   end
   table.sort(clash)
 
-  -- Where a tool body leaves a FINISHED tree it ran: `agent.delegate` puts the child
-  -- run's spans here, and the call's own span adopts them (mar-gogg).
+  -- Where a tool body leaves a FINISHED tree it ran: `agent.delegate` puts the child run's
+  -- spans here, and the call's own span adopts them.
   --
-  -- A list, not a tracer. Rule 4 withholds `model` and `ask` from a body because those
-  -- are AUTHORITY -- a body holding them could approve itself or spend the budget. A
-  -- recorder is authority of the same kind: it reaches across the whole run, and a body
-  -- with one could open a span anywhere in the tree or leave one open forever. A list of
-  -- spans that have already closed is not: it is data, this file re-stamps every id and
-  -- every parent before adopting it, and the worst a body can do with it is describe
-  -- itself inaccurately -- which a body can already do by returning any string it likes.
+  -- A list, not a tracer. A recorder is AUTHORITY, like `model` and `ask`: it reaches
+  -- across the whole run, so a body holding one could open a span anywhere or leave one
+  -- open forever. A list of already-closed spans is data, and this file re-stamps every id
+  -- and parent before adopting it.
   local nested = nil
 
   -- What a call DID, as terms, for its own span. The shell tool parses its own command
-  -- line and leaves the terms here; the command line itself never moves, which is rule 8
-  -- getting stronger rather than being relaxed for it (spec/command.md).
+  -- line and leaves the terms here; the command line itself never moves (rule 8).
   --
   -- This file does not hold the closed set and does not check against it: rule 1 lets it
   -- require the declaration surface and nothing else, and eleven terms copied here would
@@ -661,8 +655,15 @@ function turn.run(agent, prompt, port, opts)
     return c
   end
 
+  -- The conversation so far, between the system message and the prompt, copied so the
+  -- caller's list is never the run's record.
+  local function say_history()
+    for i = 1, #(opts.history or {}) do say(copy(opts.history[i])) end
+  end
+
   if depth > max_depth then
     if system_text then say { role = "system", text = system_text } end
+    say_history()
     say { role = "user", text = prompt }
     fire("start", { prompt = prompt, budget = budget, depth = depth })
     return finish("error",
@@ -671,6 +672,7 @@ function turn.run(agent, prompt, port, opts)
   end
 
   if system_text then say { role = "system", text = system_text } end
+  say_history()
   say { role = "user", text = prompt }
   fire("start", { prompt = prompt, budget = budget, depth = depth })
   for i = 1, #clash do
@@ -718,6 +720,7 @@ function turn.run(agent, prompt, port, opts)
     if record.refused then
       attrs["malleable.refused_by"] = record.vetoed and "hook" or "gate"
     end
+    if record.unmet then attrs["malleable.requirement"] = "unmet" end
     -- Sorted and joined, so the same call reads the same twice and two runs compare.
     -- `unplaced` is what the body could not name: the number that says how much of this
     -- call the vocabulary is blind to, and the one that has to go DOWN.
@@ -787,14 +790,38 @@ function turn.run(agent, prompt, port, opts)
       return rec
     end
 
+    -- Requirements, before the gate: a person is never asked to approve a call that
+    -- cannot be made. A failed one is the reason the model reads, so it repairs the call
+    -- on its next step instead of starting over (spec/turn.md, "Requirements").
+    for i = 1, #(tool.requires or {}) do
+      local r = tool.requires[i]
+      local ran_check, n_check, met, why = call_counted(r.check, context(args, step, call_id))
+      if not ran_check or met ~= true then
+        local detail = not ran_check and ("its check raised: " .. text_of(met))
+          or (n_check >= 2 and type(why) == "string" and why ~= "" and why) or nil
+        rec.unmet = r.says
+        rec.output = "the call to " .. q(name) .. " was not made: it requires that " .. r.says
+          .. (detail and (" (" .. detail .. ")") or "") .. "."
+        return rec
+      end
+    end
+
+    local edited = nil
     if tool.ask then
       rec.asked = true
       local gate_span = tracer.open_span("malleable.gate " .. tostring(name), tool_span, {
         ["gen_ai.tool.name"] = tostring(name),
       })
+      local choices = nil
+      for i = 1, #(tool.edit or {}) do
+        local p = tool.args[tool.edit[i]]
+        choices = choices or {}
+        choices[tool.edit[i]] = p.choices and copy(p.choices) or p.kind
+      end
       local asked, n, a, b = call_counted(ask, {
         agent = agent.name, tool = name, about = tool.about,
         args = copy(args), step = step, call = call_id,
+        edit = tool.edit and copy(tool.edit) or nil, choices = choices,
       })
       local decision, why, complaint
       if not asked then
@@ -810,12 +837,35 @@ function turn.run(agent, prompt, port, opts)
         decision = "deny"
         why = why or complaint
       end
+      -- An approval may carry what the person changed. Only the arguments the tool lets
+      -- them edit are read, and each must still be a value its type allows; an edit that
+      -- is not is a refusal, never a call with arguments nobody approved.
+      local good = nil
+      if decision == "allow" and type(a) == "table" and type(a.args) == "table" and tool.edit then
+        local proposed = copy(args)
+        for i = 1, #tool.edit do
+          local k = tool.edit[i]
+          if a.args[k] ~= nil and a.args[k] ~= args[k] then proposed[k] = a.args[k] end
+        end
+        local faults
+        good, faults = check_args(tool, proposed)
+        if #faults > 0 then
+          decision = "deny"
+          why = "the person's change was not a value this tool takes (" .. table.concat(faults, "; ") .. ")"
+        else
+          for i = 1, #tool.edit do
+            local k = tool.edit[i]
+            if good[k] ~= args[k] then edited = edited or {}; edited[k] = good[k] end
+          end
+        end
+      end
       -- How often an agent asks, and what it is told, is the number nobody else's
       -- telemetry has, and it says more about whether an agent is safe to leave running
       -- than any token count. The WHY is a term from a closed set, never the sentence:
       -- a gate's reason is a person's words about this call (rule 8).
       tracer.close_span(gate_span, {
         ["malleable.gate.answer"] = (complaint and "absent")
+          or (decision == "allow" and edited and "edited")
           or (decision == "allow" and "allowed")
           or (decision == "stop" and "stopped")
           or "refused",
@@ -831,6 +881,11 @@ function turn.run(agent, prompt, port, opts)
         rec.refused = true
         rec.output = "the call was refused" .. (why and (": " .. why .. ".") or ".")
         return rec
+      end
+      if edited then
+        args = good
+        rec.args = args
+        rec.edited = edited
       end
     end
 
@@ -854,6 +909,15 @@ function turn.run(agent, prompt, port, opts)
     rec.ok = true
     rec.output = output_of(v)
     if type(v) ~= "string" and v ~= nil then rec.value = v end
+    -- The model is told what the person changed, so what it says next is true.
+    if edited then
+      local keys = {}
+      for k in pairs(edited) do keys[#keys + 1] = k end
+      table.sort(keys)
+      local said = {}
+      for _, k in ipairs(keys) do said[#said + 1] = "the person chose " .. tostring(edited[k]) .. " for " .. k end
+      rec.output = rec.output .. "\n(" .. table.concat(said, "; ") .. ")"
+    end
     return rec
   end
 
@@ -876,6 +940,7 @@ function turn.run(agent, prompt, port, opts)
       system = system_text,
       messages = wire(),
       tools = spec.schema(agent),  -- fresh, so a port that edits it cannot poison step two
+      reasoning = agent.reasoning,
     }
     -- `gen_ai.provider.name` is the declaration's own prefix and nothing else. A model id
     -- with no prefix means the declaration named no provider, and the attribute is then
@@ -1027,11 +1092,29 @@ function turn.run(agent, prompt, port, opts)
         fire("result", {
           step = step, call = rec.id, tool = rec.tool, ok = rec.ok,
           output = rec.output, refused = rec.refused, asked = rec.asked, depth = depth,
+          edited = rec.edited and copy(rec.edited) or nil, unmet = rec.unmet,
         })
       end
 
       if stopped_why then
         return finish("refused", stopped_why)
+      end
+
+      -- A reply whose every call ran, each to a tool that ends a run, is the last thing
+      -- the run does: the model already said what it had to (spec/turn.md, "Tools that
+      -- end a run"). A refused or failed call is left for the model to read.
+      local ends = #calls <= per_step
+      for i = #result.calls - #calls + 1, #result.calls do
+        local rec = result.calls[i]
+        local t = rec and agent.tools[rec.tool]
+        if not (rec and rec.ok and not rec.refused and type(t) == "table" and t.ends) then ends = false end
+      end
+      if ends then
+        -- The text is already in the transcript, on the message that made the calls; a
+        -- second message saying it again would be read twice by the next run.
+        result.answer = type(reply.text) == "string" and reply.text or ""
+        return finish("answered", "the model answered after " .. step
+          .. " steps, with a tool that ends the run.")
       end
     end
   end

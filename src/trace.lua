@@ -16,29 +16,22 @@ local trace = {}
 --- Bumped when a span name or an attribute changes meaning.
 trace.VOCABULARY = 1
 
--- ------------------------------------------------------------------ the vocabulary
+-- The vocabulary, in two kinds.
 --
--- Two kinds, and the difference is a rule rather than a preference.
+-- ADOPTED: where OpenTelemetry's GenAI semantic conventions have a name, it is used
+-- verbatim -- never paraphrased, re-cased or extended. Those conventions are EXPERIMENTAL,
+-- so the version read is pinned below and a drift amends `spec/trace.md`, renaming nothing.
 --
--- ADOPTED: where OpenTelemetry's GenAI semantic conventions have a name for something,
--- that name is used verbatim and is never paraphrased, re-cased or extended. Those
--- conventions are EXPERIMENTAL and they move, so the version read is pinned below and a
--- drift amends `spec/trace.md` rather than renaming anything here. Half-adopting a
--- convention is worse than not adopting it, because a dashboard that half-works is a
--- dashboard people believe.
---
--- MINTED: everything the harness has that they do not, under one prefix, each naming a
--- closed set or a number. There is no free-text attribute anywhere in this table, which
--- is what makes rule 8 checkable rather than aspirational.
+-- MINTED: what the harness has and they do not, under one prefix, each naming a closed set
+-- or a number. No free-text attribute appears in this table, which is what makes rule 8
+-- checkable.
 
 --- The GenAI semantic conventions this tree adopts, as of the version named.
 ---
---- Pinned to the OpenTelemetry GenAI semantic conventions as they stand in
---- `open-telemetry/semantic-conventions-genai`, read 2026-09-10. They left the main
---- semantic-conventions repository at v1.42.0 (June 2026) and the dedicated one has cut
---- no release since, so v1.42.0 is the last versioned document and `main` is what is
---- actually current. Status: Development. `spec/trace.md` carries the pin and the
---- consequences; a drift amends that file rather than renaming anything here.
+--- Pinned to `open-telemetry/semantic-conventions-genai` @ main, read 2026-09-10; the last
+--- versioned document is v1.42.0 (June 2026) and the dedicated repository has cut none
+--- since. Status: Development. `spec/trace.md` carries the pin; a drift amends that file
+--- rather than renaming anything here.
 ---
 --- A name not in this list is not written; a name in it is written exactly as it appears.
 trace.ADOPTED = {
@@ -72,8 +65,9 @@ trace.MINTED = {
   ["malleable.unplaced"]    = "number",
   ["malleable.notes"]       = "number",
   ["malleable.depth"]       = "number",
-  ["malleable.gate.answer"] = { "allowed", "refused", "stopped", "absent" },
+  ["malleable.gate.answer"] = { "allowed", "edited", "refused", "stopped", "absent" },
   ["malleable.refused_by"]  = { "gate", "hook", "error" },
+  ["malleable.requirement"] = { "unmet" },
   ["malleable.unclosed"]    = "boolean",
   ["malleable.dropped"]     = "number",
   ["malleable.outcome"]     = { "passed", "failed", "undefined", "broken", "skipped" },
@@ -82,7 +76,7 @@ trace.MINTED = {
   ["malleable.rate"]        = "number",
 }
 
---- Every attribute name this tree may write, as a set. `rules-test.lua` walks every span
+--- Every attribute name this tree may write, as a set. `scripts/rules-test.lua` walks every span
 --- the whole suite produces and fails on anything outside it, which is rule 8 enforced
 --- rather than promised.
 function trace.attributes()
@@ -131,7 +125,7 @@ function trace.allowed(name, value)
                               name, table.concat(closed, ", "), tostring(value))
 end
 
--- ---------------------------------------------------------------------- rendering
+-- rendering
 
 local function esc(s)
   s = tostring(s)

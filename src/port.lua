@@ -18,10 +18,8 @@
 --   ask    request(q) -> decision               (no error channel; refusal is the failure)
 --   log    write(level, event, fields) -> nil   (cannot fail)
 --
--- Three more ports arrived with the later seams. They are OPTIONAL: an agent that
--- declares no skill, no beat and no server never calls them, and `port.check` does not
--- ask for them, because a world that must be complete before it can be partial is a
--- world nobody wires up by hand.
+-- Three more ports are OPTIONAL: an agent declaring no skill, beat or server never calls
+-- them, and `port.check` does not ask for them.
 --
 --   skills list() -> { { name, about }, ... } | nil, err   read(name) -> text | nil, err
 --   ledger get(key) -> value | nil                         put(key, value) -> true | nil, err
@@ -29,12 +27,11 @@
 --   mcp    list(server, config) -> { descriptor, ... } | nil, err
 --          call(server, tool, args) -> text | { content = { ... } } | nil, err
 --
--- The mcp port is the only one that knows what a transport is. `src/mcp.lua` hands it
--- the declaration's own table untouched -- a command line, a URL, headers -- so adding
--- a transport is a change to one port and to nothing else in the tree.
+-- The mcp port is the only one that knows what a transport is; `src/mcp.lua` hands it the
+-- declaration's table untouched, so a new transport changes one port and nothing else.
 --
--- This module is the bottom of the stack: it depends on nothing, reads no agent table,
--- knows what a tool is only as opaque data, runs no policy and names no vendor.
+-- The bottom of the stack: depends on nothing, reads no agent table, knows a tool only as
+-- opaque data, runs no policy, names no vendor.
 
 local port = {}
 
@@ -166,6 +163,9 @@ function port.shape.request(where, request)
   end
   if request.tools ~= nil and type(request.tools) ~= "table" then
     raise(where, "`request.tools` is a list or nil, got %s", type(request.tools))
+  end
+  if request.reasoning ~= nil and type(request.reasoning) ~= "string" then
+    raise(where, "`request.reasoning` is a string or nil, got %s", type(request.reasoning))
   end
   if request.timeout ~= nil and type(request.timeout) ~= "number" then
     raise(where, "`request.timeout` is a number of seconds or nil, got %s", type(request.timeout))

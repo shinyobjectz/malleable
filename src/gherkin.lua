@@ -1,9 +1,8 @@
 -- gherkin -- a feature file, read. Text in, pickles out.
 --
 -- Rule 7 of DESIGN.md lives here: this file may not name an agent, a tool, a port, a
--- world, a result or a run, and it requires nothing else in this tree. It is rule 1
--- pointing the other way, and it is what lets the reader be measured against four
--- hundred real feature files with no harness present.
+-- world, a result or a run, and it requires nothing else in this tree. That is what lets
+-- the reader be measured against four hundred real feature files with no harness present.
 --
 -- Two halves, and they do not know about each other:
 --
@@ -20,7 +19,7 @@
 
 local gherkin = {}
 
--- ---------------------------------------------------------------------- small helpers
+-- small helpers
 
 local function trim(s) return (s:gsub("^%s+", ""):gsub("%s+$", "")) end
 local function q(s) return string.format("%q", tostring(s)) end
@@ -31,7 +30,7 @@ local function at(line, fmt, ...)
   return nil, string.format("line %d: " .. fmt, line, ...)
 end
 
--- ------------------------------------------------------------------------ the keywords
+-- the keywords
 
 -- The six step keywords, longest first so `* ` never shadows anything and `And ` is not
 -- read as a description. The trailing space is part of the keyword: `Givenx` is prose.
@@ -115,14 +114,15 @@ local function cells_of(line)
   return out
 end
 
--- ---------------------------------------------------------------------------- parsing
+-- parsing
 
 local function new_step(keyword, text, line)
   return { keyword = keyword, text = text, line = line }
 end
 
--- The document, as blocks. Not public: `pickle` is the only door, because a caller who
--- held the tree would start depending on the shape of a description.
+-- The document, as blocks. Not public as it is: `pickle` is the door a runner uses, and
+-- `document` below answers a copy of the blocks and nothing about a description, because a
+-- caller who held the tree would start depending on the shape of one.
 local function parse(text)
   if type(text) ~= "string" then
     error("gherkin.pickle: a feature is a string, and arrived as " .. type(text), 3)
@@ -153,7 +153,7 @@ local function parse(text)
 
     if kind == "blank" or kind == "comment" then
       -- `# language: fr` is Gherkin's own way of saying this file is not English, and
-      -- refusing it by name is the whole reason comments are inspected at all.
+      -- refusing it by name is why comments are inspected at all.
       if kind == "comment" then
         local lang = payload:match("^#%s*language%s*:%s*([%w%-]+)")
         if lang and lang:lower() ~= "en" then
@@ -255,6 +255,7 @@ local function parse(text)
                     #cells, #step.rows[1])
         end
         step.rows[#step.rows + 1] = cells
+        step.last = n
       end
       n = n + 1
 
@@ -288,17 +289,17 @@ local function parse(text)
       end
       step.doc = table.concat(body, "\n")
       step.doc_type = payload ~= "" and payload or nil
+      step.last = m
       n = m + 1
 
     elseif kind == "step" then
       local t = target()
       if not t then
         -- A DESCRIPTION line that happens to open with a step keyword. Real Gherkin
-        -- raises here; this tree reads it as description, which is the same divergence
-        -- `canvas::scenarios` already records on the Rust side and the reason the two
-        -- agree. It is not a guess: a feature's free description regularly runs to a
-        -- sentence beginning "And ...", and refusing those costs real files
-        -- (iotaledger_iri in `vendor/rgpair`) to buy a diagnostic nobody asked for.
+        -- raises; this tree reads it as description, matching the divergence
+        -- `canvas::scenarios` records on the Rust side. A feature's free description
+        -- regularly runs to a sentence beginning "And ...", and refusing those costs real
+        -- files.
         -- After a scenario has opened there is a container, so a step is a step.
         pending_tags = nil
         n = n + 1
@@ -324,7 +325,7 @@ local function parse(text)
   return doc
 end
 
--- ------------------------------------------------------------------------- compilation
+-- compilation
 
 local function copy_steps(steps)
   local out = {}
@@ -356,15 +357,13 @@ end
 -- `<column>` everywhere in a step, including inside a doc string and a data table. A
 -- column the Examples: does not have is a refusal, not an empty string, because the
 -- silent version of this mistake is a scenario that tests nothing.
--- What can be a placeholder at all. Gherkin lets a column be named with spaces, so this
--- cannot simply be an identifier; what it must exclude is ordinary text that happens to
--- sit between a `<` and a `>`. `$lhs <= $rhs AS lte, $lhs >` is one such, and it is in
--- `vendor/rgpair` (neo4j's TernaryComparisonAcceptance) inside a doc string of Cypher.
+-- What can be a placeholder at all. A column may be named with spaces, so this cannot be
+-- an identifier; it must exclude ordinary text that happens to sit between `<` and `>`,
+-- such as `$lhs <= $rhs AS lte, $lhs >` inside a doc string of Cypher.
 --
 -- The rule: a placeholder holds no whitespace and no punctuation beyond `_ - .`. Anything
--- else is text and is left exactly as written. A `<who>` the Examples does not have is
--- still refused, because that one IS a typo and the silent version of it is a scenario
--- that tests nothing.
+-- else is text, left as written. A `<who>` the Examples lacks is still refused -- that one
+-- is a typo, and the silent version of it is a scenario that tests nothing.
 local function placeholder_shaped(name)
   return name:match("^[%w_][%w_%-%.]*$") ~= nil
 end
@@ -478,7 +477,47 @@ function gherkin.pickle(text)
   return out
 end
 
--- ------------------------------------------------------------------------- JSON, small
+--- The blocks of `text`, each with its OWN steps: the feature's name and tags, its
+--- background, its scenarios and its rules (each with a background and scenarios). For a
+--- reader that needs a block apart from what pickling merges into it -- the lines a
+--- background says once, or a scenario's lines without the background in front. Every
+--- step carries `line`, and `last` when a doc string or table runs past it.
+--- `nil, sentence` on a feature this tree will not read.
+function gherkin.document(text)
+  local doc, why = parse(text)
+  if not doc then return nil, why end
+  local function steps_of(list)
+    local out = copy_steps(list)
+    for i = 1, #list do out[i].last = list[i].last or list[i].line end
+    return out
+  end
+  local function tags_of_block(t)
+    local out = {}
+    for i = 1, #(t or {}) do out[i] = t[i] end
+    return out
+  end
+  local function block(b)
+    if not b then return nil end
+    return { name = b.name, line = b.line, kind = b.kind, tags = tags_of_block(b.tags),
+             steps = steps_of(b.steps) }
+  end
+  local function scenarios(list)
+    local out = {}
+    for i = 1, #list do out[i] = block(list[i]) end
+    return out
+  end
+  local out = { name = doc.name, line = doc.line, tags = tags_of_block(doc.tags),
+                background = block(doc.background), scenarios = scenarios(doc.scenarios),
+                rules = {} }
+  for r = 1, #doc.rules do
+    local rule = doc.rules[r]
+    out.rules[r] = { name = rule.name, line = rule.line, tags = tags_of_block(rule.tags),
+                     background = block(rule.background), scenarios = scenarios(rule.scenarios) }
+  end
+  return out
+end
+
+-- JSON, small
 --
 -- `{value}` needs to decode JSON and nothing in this tree does. Sixty lines here keeps
 -- rule 7 absolute: this file requires nothing at all.
@@ -585,7 +624,7 @@ function gherkin.value(text)
   return t
 end
 
--- ----------------------------------------------------------------------- expressions
+-- expressions
 --
 -- A cucumber expression compiles into a list of segments, and matching walks them with
 -- backtracking. Not into one pattern: Lua patterns have no alternation, and `{value}` is

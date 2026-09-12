@@ -171,11 +171,11 @@ function T.declaring_runs_nothing()
   assert(decl.args.command.required == true)
   assert(decl.args.cwd.required == false)
   assert(decl.args.timeout_ms.required == false)
-  -- and no fifth key
+  -- and no sixth key: effect says it runs a command (spec/home.md)
   local keys = {}
   for k in pairs(decl) do keys[#keys + 1] = k end
   table.sort(keys)
-  assert(table.concat(keys, ",") == "about,args,ask,run", table.concat(keys, ","))
+  assert(table.concat(keys, ",") == "about,args,ask,effect,run", table.concat(keys, ","))
   assert(exploding.exec ~= nil and ran == 0)
 end
 

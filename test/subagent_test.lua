@@ -1113,4 +1113,13 @@ function T.the_module_requires_only_turn()
   end
 end
 
+function T.the_spec_still_forbids_two_children_and_names_the_wait_table()
+  local path = here .. "/../docs/spec/subagent.md"
+  local f = io.open(path, "rb") or io.open(here .. "/../spec/subagent.md", "rb")
+  assert(f, "spec/subagent.md is missing")
+  local text = f:read("*a"); f:close()
+  assert(text:find("must not run two children at once", 1, true))
+  assert(text:find("src/wait.lua", 1, true), "the spec does not name the host wait table")
+end
+
 return T

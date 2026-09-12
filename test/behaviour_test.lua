@@ -152,7 +152,7 @@ end
 
 function T.the_vocabulary_is_closed_and_every_expression_compiles_once()
   local steps = behaviour.steps()
-  assert(#steps == 36, #steps .. " expressions")
+  assert(#steps == 46, #steps .. " expressions")   -- 46 since `no beat is due` (2026-09-12)
   local skeletons, n = behaviour.skeletons(), 0
   for _ in pairs(skeletons) do n = n + 1 end
   -- One skeleton each: two built-ins that read the same line would make every scenario
@@ -160,7 +160,7 @@ function T.the_vocabulary_is_closed_and_every_expression_compiles_once()
   assert(n == #steps, n .. " skeletons for " .. #steps .. " expressions")
   local phases = { given = 0, when = 0, ["then"] = 0 }
   for i = 1, #steps do phases[steps[i].phase] = phases[steps[i].phase] + 1 end
-  assert(phases.given == 13 and phases.when == 3 and phases["then"] == 20,
+  assert(phases.given == 16 and phases.when == 3 and phases["then"] == 27,
          string.format("%d/%d/%d", phases.given, phases.when, phases["then"]))
 end
 

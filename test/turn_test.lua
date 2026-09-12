@@ -130,6 +130,26 @@ function T.a_plain_answer_ends_the_turn()
   assert(p.seen[1].model == "test:model")
 end
 
+-- `agent.reasoning` rides on every request, and is absent when nothing was declared, so a
+-- port that cannot tell its model how hard to think has nothing to ignore.
+function T.a_declared_reasoning_reaches_every_request()
+  local a = echo_tool(base())
+  local p = scripted { { text = "all done" } }
+  turn.run(a, "say hello", p)
+  assert(p.seen[1].reasoning == nil, tostring(p.seen[1].reasoning))
+
+  spec.set_reasoning(a, "low")
+  p = scripted { { calls = { { id = "c1", tool = "echo", args = { line = "x" } } } }, { text = "done" } }
+  turn.run(a, "say hello", p)
+  assert(#p.seen == 2)
+  for i = 1, 2 do assert(p.seen[i].reasoning == "low", tostring(p.seen[i].reasoning)) end
+
+  for _, bad in ipairs { "LOW", "", "max", 1, true } do
+    assert(not pcall(spec.set_reasoning, a, bad), "agent.reasoning took " .. tostring(bad))
+  end
+  assert(a.reasoning == "low")
+end
+
 function T.a_tool_call_runs_and_comes_back()
   local a = echo_tool(base())
   local p = scripted {

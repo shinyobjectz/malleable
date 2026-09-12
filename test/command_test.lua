@@ -105,6 +105,18 @@ end
 -- term is reachable, but that no term is reachable from a line that plainly means another.
 -- A vocabulary where `git push` reads as `inspects` is worse than one with a gap in it,
 -- because a gap is counted and a wrong term is believed.
+-- Found by the long-task eval: the model's every install, test and build went unplaced.
+function T.npm_aliases_and_npx_are_named_by_what_they_run()
+  local function acts(line) local a = command.acts(line).acts; table.sort(a); return table.concat(a, ",") end
+  assert(acts("npm init -y && npm i -D typescript vitest") == "installs,writes", acts("npm init -y && npm i -D typescript vitest"))
+  assert(acts("npx vitest run") == "tests")
+  assert(acts("npx --yes tsc --noEmit") == "builds")
+  assert(acts("npm exec vitest") == "tests")
+  assert(acts("npm pkg set scripts.test=vitest") == "writes")
+  assert(command.acts("npx some-unknown-thing").unplaced == 1)
+  assert(command.acts("node dist/cli.js add x").unplaced == 1)
+end
+
 function T.no_term_is_reachable_from_a_line_that_plainly_means_another()
   local wrong = {
     { "git push origin main",        must_not = { "inspects", "reads", "tests" } },

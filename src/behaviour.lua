@@ -1,24 +1,19 @@
 -- behaviour -- a feature file is what the agent does, and the test that it does it.
 --
--- The vocabulary is CLOSED and BUILT IN: thirty-one expressions over the harness's own
--- nouns -- the six ports, the three seams, the model's script, the gate, the four stops,
--- the calls, the notes and the budget -- which are the only nouns a harness has. A
--- declaration is therefore verifiable with no glue code written at all, and `agent.step`
+-- The vocabulary is CLOSED and BUILT IN: expressions over the harness's own nouns -- the
+-- six ports, the three seams, the model's script, the gate, the four stops, the calls, the
+-- notes and the budget. A declaration is verifiable with no glue code, and `agent.step`
 -- exists for a DOMAIN rather than for the basics.
 --
--- Rule 6 of DESIGN.md lives here, and it is structural rather than conventional:
+-- Rule 6 of DESIGN.md lives here, structurally:
 --
 --     A `Given` line may only write the world. A `Then` line may only read the result.
 --
--- A given body is handed a context with a `world` and no `result`; a then body is handed
--- one with a `result` and a world that is a read-only proxy, so a write raises by name.
--- Neither carries a port, a model, a file handle or a clock. There is no arrangement of
--- fields that crosses them, because a scenario that could act on what it claims to be
--- observing is a test that passes because it tested itself.
+-- A given body gets a `world` and no `result`; a then body gets a `result` and a read-only
+-- world, so a write raises by name. Neither carries a port, model, file handle or clock.
 --
--- This module requires `gherkin` and `double` and nothing else. It reaches a declaration
--- only through the drivers table it is handed -- run, tick, check -- so a feature cannot
--- test an internal that a host would not be allowed to depend on.
+-- Requires `gherkin` and `double`, nothing else. It reaches a declaration only through the
+-- drivers table it is handed -- run, tick, check.
 --
 -- Contract: spec/behaviour.md. Amend that before this diverges from it.
 
@@ -26,13 +21,14 @@ local gherkin = require "gherkin"
 local double  = require "double"
 local observe = require "observe"
 local command = require "command"
+local store   = require "store"
 
 local behaviour = {}
 
 --- Bumped when an expression changes meaning.
 behaviour.VOCABULARY = 1
 
--- ---------------------------------------------------------------------- small helpers
+-- small helpers
 
 local function trim(s) return (s:gsub("^%s+", ""):gsub("%s+$", "")) end
 local function chomp(s) return (tostring(s):gsub("%s+$", "")) end
@@ -65,25 +61,17 @@ end
 
 -- The read-only world a then body sees.
 --
--- A DEEP COPY with a raising `__newindex` on every table, rather than an index proxy. A
--- proxy would need `__pairs` and `__len` to be transparent, and those are 5.2 and later:
--- under the LuaJIT half of this tree's dialect a proxied world iterates as empty, so a
--- Then line that counted anything silently counted nothing and its scenario failed for a
--- reason that was not true. Copying is transparent in both.
+-- A DEEP COPY with a raising `__newindex`, not an index proxy: a proxy needs `__pairs`
+-- and `__len` to be transparent, which are 5.2 and later, so under LuaJIT a proxied world
+-- iterates as empty. Copying is transparent in both dialects.
 --
--- Every FUNCTION becomes a stub that raises. A then body has no business calling into the
--- world -- it reads what the run recorded -- and leaving the ports callable would leave
--- `c.world.fs.write(...)` open, which is rule 6 with a door in it.
+-- Every FUNCTION becomes a raising stub. A then body reads what the run recorded; leaving
+-- the ports callable would leave `c.world.fs.write(...)` open, which is rule 6 with a door.
 --
--- WHAT THE GUARANTEE ACTUALLY IS, stated plainly because half of it is a diagnostic and
--- the other half is the rule. The RULE is isolation: this is a fresh copy, built for each
--- Then line, so nothing a Then line does to it reaches the run, the next line, or the
--- world the next assertion reads. That holds for every write, including `world.fs = nil`,
--- which lands on a copy about to be discarded. The DIAGNOSTIC is `__newindex`, which
--- fires on a key the world does not have -- the common typo -- and names it. Lua does not
--- run `__newindex` for a key that is already present, and buying that back would need an
--- index proxy, which cannot be iterated under 5.1. Isolation is the stronger of the two
--- and it is the one that does not depend on the dialect.
+-- Two guarantees, and they are not equal. The RULE is isolation: a fresh copy per Then
+-- line, so nothing it does reaches the run or the next assertion -- true for every write,
+-- including `world.fs = nil`. The DIAGNOSTIC is `__newindex`, which names a key the world
+-- does not have; Lua does not fire it for a key already present.
 local function frozen(t, path, seen)
   if type(t) ~= "table" then return t end
   seen = seen or {}
@@ -135,19 +123,18 @@ local function epoch(text)
   return days * 86400 + hh * 3600 + mm * 60 + ss
 end
 
--- ------------------------------------------------------------------- the world, built
---
--- A given line writes into a CONFIG, and the config becomes a world at the `When`. That
--- ordering is what makes "a given may only write the world" enforceable: there is no
--- world yet to act on.
+-- The world, built. A given line writes into a CONFIG, and the config becomes a world at
+-- the `When` -- which is what makes "a given may only write the world" enforceable: there
+-- is no world yet to act on.
 
 local function new_config()
   return { fs = {}, sh = {}, ask = {}, clock = nil, model = {},
-           skills = nil, ledger = nil, mcp = nil, budget = nil }
+           skills = nil, ledger = nil, mcp = nil, budget = nil, store = nil }
 end
 
 local KNOWN = { fs = true, sh = true, ask = true, clock = true, model = true,
-                skills = true, ledger = true, mcp = true, budget = true, shell = true }
+                skills = true, ledger = true, mcp = true, budget = true, shell = true,
+                store = true }
 
 local function materialise(cfg)
   local w = { fs = cfg.fs, sh = cfg.sh, ask = cfg.ask, model = { replies = cfg.model } }
@@ -158,18 +145,17 @@ local function materialise(cfg)
   if cfg.skills then w.skills = cfg.skills end
   if cfg.ledger then w.ledger = cfg.ledger end
   if cfg.mcp then w.mcp = cfg.mcp end
+  if cfg.store then w.store = cfg.store end
   local world = double.world(w)
-  -- Whatever a declared given line put in the config that is not one of the nine ports
-  -- rides along onto the world, so a workspace's own state survives to its Then lines.
-  -- Without this, `c.world.queue` is written in the given phase and gone by the then --
-  -- which reads as a failing assertion rather than as a harness that dropped it.
+  -- Whatever a given line put in the config that is not one of the nine ports rides onto
+  -- the world, so a workspace's own state survives to its Then lines.
   for k, v in pairs(cfg) do
     if not KNOWN[k] then world[k] = v end
   end
   return world
 end
 
--- --------------------------------------------------------------------- the vocabulary
+-- the vocabulary
 
 local BUILT_IN = {}
 
@@ -177,11 +163,23 @@ local function step(expr, phase, about, run)
   BUILT_IN[#BUILT_IN + 1] = { expr = expr, phase = phase, about = about, run = run, built_in = true }
 end
 
--- given: the world -------------------------------------------------------------------
+-- given: the world
 
 step("the file {string} contains:", "given", "a file the agent can read", function (c)
   if c.doc == nil then return no("this line needs a doc string under it") end
   c.world.fs[c.args[1]] = c.doc
+end)
+
+-- A file whose text a history keeps apart (spec/history.md): a story names a long text by
+-- its id rather than holding it, and the runner is handed the history to find it in.
+step("the file {string} contains the text kept as {word}", "given",
+  "a file the agent can read, whose text a history keeps", function (c)
+  if type(c.kept) ~= "function" then
+    return no("this line names a kept text, and the scenario runs with no history to find it in")
+  end
+  local text = c.kept(c.args[2])
+  if type(text) ~= "string" then return no("the history keeps no text called %s", c.args[2]) end
+  c.world.fs[c.args[1]] = text
 end)
 
 step("the file {string} is missing", "given", "a file that is not there", function (c)
@@ -198,9 +196,7 @@ end)
 -- scripts one; this one really runs it, over the world's own filesystem, so `echo x >
 -- a.txt` is a file the next line finds.
 --
--- Added when `spec/shell.feature` needed to state a sandboxed agent's world and found it
--- could not: `agent.sandbox` was a first-class door with nothing in the vocabulary that
--- could say a feature used it. A gap of exactly the kind the ratchet is for.
+-- This is what lets a feature state a sandboxed agent's world (`agent.sandbox`).
 step("the shell really runs", "given", "the world's shell executes, over its own files",
 function (c)
   c.world.shell = true
@@ -212,6 +208,40 @@ end)
 
 step("the human refuses {word}", "given", "the gate says no to this tool", function (c)
   c.world.ask[c.args[1]] = false
+end)
+
+-- The person changes what the model proposed, then approves: the tool gets these values
+-- for the arguments it lets them edit (spec/turn.md, "Edits at the gate").
+step("the human approves {word} with {value}", "given",
+     "the gate says yes, with the person's own values for what they may change", function (c)
+  if type(c.args[2]) ~= "table" then
+    return no("what the person chose is a table of arguments, and this is %s", show(c.args[2]))
+  end
+  c.world.ask[c.args[1]] = { allow = true, args = c.args[2] }
+end)
+
+-- A data table: the header names the columns, and each row after it is one row of the
+-- store, typed by the declaration (src/store.lua).
+local function table_rows(c, name)
+  local decl = c.stores and c.stores[name]
+  if not decl then return nil, "there is no store called " .. q(name) end
+  if not c.rows or #c.rows < 1 then return nil, "this line needs a data table under it, a header first" end
+  local header, out = c.rows[1], {}
+  for r = 2, #c.rows do
+    local cells = {}
+    for i = 1, #header do cells[header[i]] = c.rows[r][i] or "" end
+    local row, why = store.from_text(decl, cells)
+    if not row then return nil, why end
+    out[#out + 1] = row
+  end
+  return out, nil, decl, header
+end
+
+step("the store {word} contains:", "given", "the rows a program's store starts with", function (c)
+  local rows, why = table_rows(c, c.args[1])
+  if not rows then return no("%s", why) end
+  c.world.store = c.world.store or {}
+  c.world.store[c.args[1]] = rows
 end)
 
 step("the clock reads {string}", "given", "the moment the run happens at", function (c)
@@ -250,7 +280,10 @@ function (c)
   c.world.ledger[key] = value
 end)
 
-step("the server {word} offers {word}, which answers {value}", "given",
+-- Said without a comma after the tool's name: a `{word}` reads to the next space, so an
+-- expression with punctuation straight after one can never match (found by
+-- showcase/12-servers.feature, 2026-09-12; the same amendment as the delegate line).
+step("the server {word} offers {word} and it answers {value}", "given",
      "a tool that lives in another process", function (c)
   c.world.mcp = c.world.mcp or {}
   local s = c.world.mcp[c.args[1]] or { tools = {}, answers = {} }
@@ -264,7 +297,7 @@ step("the budget is {int}", "given", "how many passes the loop may take", functi
   c.world.budget = c.args[1]
 end)
 
--- when: the run ----------------------------------------------------------------------
+-- when: the run
 
 step("the agent is asked {string}", "when", "somebody asks the agent for something",
 function (c)
@@ -277,12 +310,18 @@ step("the clock strikes {string}", "when", "the beat comes round", function (c)
   return c.drive.tick(at)
 end)
 
+step("no beat is due", "then", "the strike made no run: every beat was held or not yet due", function (c)
+  if c.result ~= nil then
+    return no("a beat ran: the run stopped with %s", q(tostring(c.result.stop)))
+  end
+end)
+
 step("the declaration is loaded", "when", "nothing runs; the declaration is checked",
 function (c)
   return c.drive.check()
 end)
 
--- then: the result -------------------------------------------------------------------
+-- then: the result
 
 local function ran(c)
   if not c.result then
@@ -344,19 +383,21 @@ step("it calls {word} {int} time(s)", "then", "called exactly this many times", 
   if n ~= c.args[2] then return no("it called %s %d time(s)", q(c.args[1]), n) end
 end)
 
--- What the agent did with a shell, in the language somebody would have used to ask for
--- it. The call line above says a tool was used; these say what using it AMOUNTED TO, which
--- is the only half a person writing a feature file up front can state.
+-- What the agent did with a shell, in the language somebody would have used to ask for it.
+-- The call line above says a tool was used; these say what using it AMOUNTED TO, which is
+-- the half a person writing a feature file up front can state.
 --
--- `it never runs a command that publishes` is the one that earns the vocabulary. An agent
--- that inspects a lot is working; an agent that publishes has done the thing nobody can
--- undo for it, and no tool name or token count says so (spec/command.md).
+-- `it never runs a command that publishes` is what earns the vocabulary: no tool name or
+-- token count distinguishes an agent that inspects from one that publishes
+-- (spec/command.md).
 local function acted(c, term)
   local r = c.result
   local found, unplaced = false, 0
   for i = 1, #((r and r.calls) or {}) do
+    -- a call the gate or a hook refused ran nothing: "it runs no command that publishes"
+    -- is about what ran, and a refused push is the gate working, not a publish
     local said = type(r.calls[i].args) == "table" and r.calls[i].args.command or nil
-    if type(said) == "string" and said ~= "" then
+    if type(said) == "string" and said ~= "" and not r.calls[i].refused then
       local read = command.acts(said)
       unplaced = unplaced + (read.unplaced or 0)
       for j = 1, #read.acts do
@@ -434,10 +475,92 @@ step("the file {string} holds:", "then", "what the file holds after the run", fu
   if chomp(got) ~= chomp(c.doc) then return no("it holds %s", q(got)) end
 end)
 
+step("the file {string} holds the text kept as {word}", "then",
+  "what the file holds after the run, as a text a history keeps", function (c)
+  if type(c.kept) ~= "function" then
+    return no("this line names a kept text, and the scenario runs with no history to find it in")
+  end
+  local want = c.kept(c.args[2])
+  if type(want) ~= "string" then return no("the history keeps no text called %s", c.args[2]) end
+  local files = c.world and c.world.fs and c.world.fs.files
+  if not files then return no("this world has no filesystem") end
+  local got = files[c.args[1]]
+  if got == nil then return no("there is no file at %s", q(c.args[1])) end
+  if chomp(got) ~= chomp(want) then return no("it holds %s", q(got)) end
+end)
+
+step("the store {word} holds:", "then", "every row of the store after the run, in its order",
+function (c)
+  local want, why, decl, header = table_rows(c, c.args[1])
+  if not want then return no("%s", why) end
+  local held = c.world and c.world.store and c.world.store.tables and c.world.store.tables[c.args[1]] or {}
+  local got = store.sorted(decl, held)
+  want = store.sorted(decl, want)
+  local function line(row)
+    local t = store.to_text(decl, row)
+    local cells = {}
+    for i = 1, #header do cells[i] = t[header[i]] or "" end
+    return table.concat(cells, " | ")
+  end
+  local shown = {}
+  for i = 1, #got do shown[i] = line(got[i]) end
+  if #got ~= #want then
+    return no("it holds %d row(s): %s", #got, #shown > 0 and table.concat(shown, "; ") or "none")
+  end
+  for i = 1, #want do
+    if line(want[i]) ~= line(got[i]) then return no("row %d is %s", i, line(got[i])) end
+  end
+end)
+
+step("the store {word} has {int} row(s)", "then", "how many rows the store holds after the run",
+function (c)
+  if not (c.stores and c.stores[c.args[1]]) then return no("there is no store called %s", q(c.args[1])) end
+  local held = c.world and c.world.store and c.world.store.tables and c.world.store.tables[c.args[1]] or {}
+  if #held ~= c.args[2] then return no("it holds %d", #held) end
+end)
+
+step("the call to {word} answers {string}", "then", "a call to the tool went through and said this",
+function (c)
+  local r, why = ran(c); if not r then return no("%s", why) end
+  local made = calls_to(c, c.args[1])
+  if #made == 0 then return no("it never called %s", q(c.args[1])) end
+  for i = 1, #made do
+    if made[i].ok and contains(made[i].output, c.args[2]) then return true end
+  end
+  return no("the call to %s answered %s", q(c.args[1]), q(made[#made].output))
+end)
+
+local ORDINALS = { first = 1, second = 2, third = 3, fourth = 4, fifth = 5, last = -1 }
+
+step("the {word} call to {word} fails because {string}", "then",
+     "that call did not go through, and this is why", function (c)
+  local r, why = ran(c); if not r then return no("%s", why) end
+  local at = ORDINALS[c.args[1]]
+  if not at then return no("%s is not first, second, third, fourth, fifth or last", q(c.args[1])) end
+  local made = calls_to(c, c.args[2])
+  local call = at == -1 and made[#made] or made[at]
+  if not call then return no("it called %s %d time(s)", q(c.args[2]), #made) end
+  if call.ok then return no("that call went through") end
+  if call.refused then return no("that call was refused: %s", q(call.output)) end
+  if not contains(call.output, c.args[3]) then return no("it failed because %s", q(call.output)) end
+end)
+
+step("the tool {word} tells the model {string}", "then", "what the model reads about this tool, containing",
+function (c)
+  if not c.schema then return no("this line reads the declaration, and there is none here") end
+  for _, t in ipairs(c.schema()) do
+    if t.name == c.args[1] then
+      if contains(t.about, c.args[2]) then return true end
+      return no("it tells the model %s", q(t.about))
+    end
+  end
+  return no("there is no tool called %s", q(c.args[1]))
+end)
+
 step("nothing is written", "then", "no file was written or removed", function (c)
   local fs = c.world and c.world.fs
   if not fs then return no("this world has no filesystem") end
-  if #(fs.wrote or {}) > 0 then return no("it wrote %s", q(fs.wrote[1])) end
+  if #(fs.wrote or {}) > 0 then return no("it wrote %s", q(fs.wrote[1].path)) end
   if #(fs.removed or {}) > 0 then return no("it removed %s", q(fs.removed[1])) end
 end)
 
@@ -464,15 +587,8 @@ step("the declaration is refused because {string}", "then", "and this is why", f
   return no("it is refused because: %s", table.concat(c.checked.reasons or {}, "; "))
 end)
 
--- then: the calls that did not go through ----------------------------------------------
---
--- These two came out of RETIRING the eight telemetry expressions that stood here first
--- (`the trace shows`, `the span ... says ...`). Trying to say the same things
--- behaviourally showed that six of the eight were already covered by `it calls`,
--- `it never calls`, `the call to ... is refused` and `it takes N steps` -- and that two
--- things a person genuinely wanted to state had no word at all. That is the discipline
--- working: a gap in the vocabulary is filled with a behavioural word, never with a
--- telemetry noun (DESIGN.md, "The direction").
+-- then: the calls that did not go through. No telemetry expression stands here -- a gap in
+-- the vocabulary is filled with a behavioural word (DESIGN.md, "The direction").
 
 step("the call to {word} fails", "then", "it was called, and the call did not go through",
 function (c)
@@ -517,7 +633,7 @@ function behaviour.steps()
   return out
 end
 
--- --------------------------------------------------------------------- the registry
+-- the registry
 
 -- Compiled once, at load. A built-in that does not compile is a bug in this file and
 -- raises here rather than on the eleventh scenario.
@@ -542,9 +658,8 @@ function behaviour.skeletons()
 end
 
 -- Always the whole vocabulary, in both modes. An eval DROPS the two lines that script a
--- model rather than un-defining them: removing them from the registry made them match
--- nothing, and "no expression matches this line" is a true sentence about a false problem
--- -- the expression exists, it just has nothing to do when a real model is answering.
+-- model rather than un-defining them, so they do not report as unmatched: the expression
+-- exists, it just has nothing to do when a real model is answering.
 local function registry(drivers)
   local out = {}
   local list = compiled()
@@ -580,9 +695,8 @@ end
 --- Declare a step on `a`. The compile and the collision refusals live here rather than
 --- in `spec.lua`, which requires nothing and must go on requiring nothing (rule 2).
 ---
---- A workspace does not get to redefine what a built-in means, so a colliding expression
---- is refused at declaration naming both, rather than becoming an ambiguity that surfaces
---- on whichever scenario happens to use it first.
+--- A workspace does not redefine a built-in: a colliding expression is refused at
+--- declaration, naming both, rather than surfacing on whichever scenario uses it first.
 function behaviour.declare(spec, a, expr, d)
   if type(expr) == "string" and expr ~= "" then
     local e, why = gherkin.expr(expr)
@@ -606,7 +720,7 @@ function behaviour.declare(spec, a, expr, d)
   return spec.add_step(a, expr, d)
 end
 
--- ------------------------------------------------------------------------- one scenario
+-- one scenario
 
 local OUTCOMES = { passed = true, failed = true, undefined = true, broken = true, skipped = true }
 
@@ -617,11 +731,9 @@ local function stub(text)
   return string.format('agent.step %q {\n  given = function (c) ... end,   -- or then_\n}', expr)
 end
 
--- A scenario is NOT EVALUABLE when every one of its steps but the When is a line that
--- scripts the model. Such a scenario states nothing about the world and nothing about the
--- outcome beyond what it put in the model's mouth, so with a real model answering there
--- is nothing left of it to score. Computed rather than declared, so nobody has to
--- remember a tag; `@verify-only` is the one tag this runner reads, and it opts out.
+-- A scenario is NOT EVALUABLE when every step but the When scripts the model: it states
+-- nothing beyond what it put in the model's mouth, so a real model leaves nothing to score.
+-- Computed rather than declared; `@verify-only` is the one tag this runner reads.
 local function evaluable(pickle, reg)
   if #pickle.steps == 0 then return false, "it has no steps" end
   for i = 1, #pickle.tags do
@@ -679,10 +791,8 @@ local function run_scenario(pickle, drivers, opts)
 
   local reg = registry(drivers)
 
-  -- A dry pass first, because "this scenario has no When" is a fact about the FILE and
-  -- not about a run. Before this it surfaced as the first Then line failing with "this
-  -- line reads a run and there is none", which sends a person to the wrong line: the
-  -- Then line is fine, and the scenario is the thing nobody finished.
+  -- A dry pass first: "this scenario has no When" is a fact about the FILE, not a run, and
+  -- reporting it on the first Then line would send a person to the wrong line.
   --
   -- An unmatched step suspends the judgement. A scenario whose When is a step nobody has
   -- defined yet is UNDEFINED, not unfinished, and those mean different things.
@@ -734,7 +844,8 @@ local function run_scenario(pickle, drivers, opts)
         outcome = "broken"
       else
         local ctx = { args = args, doc = s.doc, rows = s.rows, drive = drive,
-                      mark = drivers.mark }
+                      mark = drivers.mark, stores = drivers.stores, schema = drivers.schema,
+                      kept = drivers.kept or opts.kept }
         if def.phase == "then" then
           ctx.result = state.result
           ctx.checked = state.checked
@@ -761,14 +872,12 @@ local function run_scenario(pickle, drivers, opts)
 
   if #pickle.steps == 0 then outcome = "undefined" end
 
-  -- The scenario span, and everything the run did under it. THE JOIN: a trace in a
-  -- collector is attributable to the sentence in the feature file that asked for it, and
-  -- without that a falling rate says a thing is broken without saying where.
+  -- The scenario span, and everything the run did under it: a trace in a collector is
+  -- attributable to the sentence in the feature file that asked for it.
   --
-  -- Built here rather than inside the loop because a scenario is not a run -- it may make
-  -- no run at all, or one, and it is this file that knows which. The run's own root is
-  -- re-parented under it; ids are unique within a scenario, and "0" is not one the
-  -- recorder mints.
+  -- Built here rather than in the loop because a scenario may make no run at all, or one,
+  -- and this file knows which. The run's root is re-parented under it; ids are unique
+  -- within a scenario, and "0" is not one the recorder mints.
   local spans = nil
   if state.result and type(state.result.spans) == "table" then
     local ms, at = 0, nil
@@ -802,7 +911,8 @@ local function run_scenario(pickle, drivers, opts)
            -- eval can observe every sample without running anything twice.
            record = (state.result or state.checked) and
                     { result = state.result, world = state.world, cfg = cfg,
-                      prompt = state.prompt, checked = state.checked } or nil }
+                      prompt = state.prompt, checked = state.checked,
+                      stores = drivers and drivers.stores } or nil }
 end
 
 --- One scenario's run, read back out as behaviour. `nil` when nothing ran.
@@ -811,7 +921,7 @@ function behaviour.observe(scenario, name)
   return observe.run(scenario.record, name or ("observed — " .. tostring(scenario.name)))
 end
 
--- ---------------------------------------------------------------------------- running
+-- running
 
 --- Every scenario against the doubles. Answers a table and prints nothing.
 function behaviour.run(pickles, drivers, opts)
@@ -853,13 +963,10 @@ function behaviour.run(pickles, drivers, opts)
           -- where. Three of them: a person reads the first and the rest are the same.
           kept[#kept + 1] = one
         end
-        -- EVERY sample is observed, passing or not. A pass rate says how often the agent
-        -- did what its documentation says; the repertoire says how many different things
-        -- it does and which, which is the question a rate cannot answer.
-        -- Only under an eval. A verify runs one sample against a scripted model, where a
-        -- "repertoire" of one behaviour and a list of four lines nobody stated is noise
-        -- rather than news. The gaps below are collected in both modes, because those
-        -- are news either way.
+        -- EVERY sample is observed, passing or not: a rate says how often the agent did
+        -- what its documentation says, the repertoire says how many different things it
+        -- does. Eval only -- a verify runs one sample against a scripted model, where a
+        -- repertoire of one is noise. The gaps below are collected in both modes.
         if eval and one.record then
           local seen_one = observe.run(one.record, "observed — " .. tostring(pickle.name))
           if seen_one then seen[#seen + 1] = seen_one end
@@ -880,10 +987,9 @@ function behaviour.run(pickles, drivers, opts)
       if samples > 1 then last.outcome = passes == samples and "passed" or "failed" end
       report.scenarios[#report.scenarios + 1] = last
       report[last.outcome] = (report[last.outcome] or 0) + 1
-      -- Every run is observed, in both modes, and what the vocabulary could not say comes
-      -- back here. Not behind a flag: a gap is a finding, and a finding nobody sees is a
-      -- finding nobody acts on. This is the ratchet -- the count goes down, and a new
-      -- KIND of gap is a question about the vocabulary rather than a defect.
+      -- Every run is observed in both modes, and what the vocabulary could not say comes
+      -- back here -- not behind a flag. The count goes down; a new KIND of gap is a
+      -- question about the vocabulary rather than a defect.
       if last.record then
         local _, _, some = observe.run(last.record)
         for g = 1, #(some or {}) do report.raw_gaps[#report.raw_gaps + 1] = some[g] end
@@ -902,7 +1008,7 @@ function behaviour.run(pickles, drivers, opts)
   return report
 end
 
--- ----------------------------------------------------------------------------- checking
+-- checking
 
 --- The problems a run would hit, as sentences, reaching no port at all.
 function behaviour.check(pickles, drivers)
@@ -979,7 +1085,7 @@ function behaviour.check(pickles, drivers)
   return problems
 end
 
--- ---------------------------------------------------------------------------- reporting
+-- reporting
 
 --- The report as text. Pure: the caller decides where it goes, because this tree has no
 --- idea what stdout is.
@@ -1006,11 +1112,9 @@ function behaviour.report(t, opts)
         for k = 2, #did do line("                 %s", did[k]) end
       end
     end
-    -- Only when there is ONE behaviour. With more than one, the listing above already
-    -- shows what differs, and printing both drowns the signal in the four lines every
-    -- observation carries (it stops with, it takes N steps, nothing is written, it
-    -- answers). With one, this is the useful half: your agent consistently does these
-    -- things and nobody ever wrote them down.
+    -- Only when there is ONE behaviour. With more, the listing above already shows what
+    -- differs, and printing both drowns it in the four lines every observation carries.
+    -- With one, this is the useful half: what the agent consistently does, unwritten.
     if s.agreement and s.repertoire and #s.repertoire == 1 and #s.agreement.unstated > 0 then
       line("        happened, and nobody said:")
       for u = 1, #s.agreement.unstated do line("          %s", s.agreement.unstated[u]) end
@@ -1037,10 +1141,8 @@ function behaviour.report(t, opts)
   if t.undefined > 0 and t.passed == 0 then
     line("every scenario is undefined: this feature is not wired to anything")
   end
-  -- What the runs did that the vocabulary has no sentence for. NOT a failure and not
-  -- counted against anything: it is the work list for growing the vocabulary, and the
-  -- rule is that it is never closed by reaching for a telemetry noun (DESIGN.md, "The
-  -- direction").
+  -- What the runs did that the vocabulary has no sentence for. Not a failure: it is the
+  -- work list for growing the vocabulary, never closed by reaching for a telemetry noun.
   if t.gaps and #t.gaps > 0 then
     line("")
     line("%d gap%s in the behavioural vocabulary:", #t.gaps, #t.gaps == 1 and "" or "s")

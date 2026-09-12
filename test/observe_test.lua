@@ -629,4 +629,29 @@ function T.wrong_shapes_raise()
   assert(not pcall(observe.agreement, {}, 7))
 end
 
+function T.a_run_still_going_is_observed_as_the_scenario_so_far()
+  local record = { prompt = "what do my notes say?", result = { steps = 2, calls = {
+    { id = "1", tool = "list", args = { dir = "notes" }, step = 1, ok = true },
+    { id = "2", tool = "read", args = { path = "notes/a.md" }, step = 2 },
+  } } }
+  local text, gaps = observe.live(record, "j1 notebook: what do my notes say?")
+  assert(#gaps == 0)
+  assert(text:find("Scenario: j1 notebook: what do my notes say?", 1, true))
+  assert(text:find('Given the model calls list with {"dir":"notes"}', 1, true), text)
+  assert(text:find('And the model calls read with {"path":"notes/a.md"}', 1, true), text)
+  assert(text:find('When the agent is asked "what do my notes say?"', 1, true), text)
+  assert(text:find('Then it calls list with {"dir":"notes"}', 1, true), text)
+  assert(not text:find("it stops with", 1, true), "a run still going has no stop")
+  -- once it has stopped, the stop and the steps come first among the Then lines
+  record.result.stop, record.result.answer = "answered", "two notes"
+  record.log = { order = { "notes/b.md" }, files = { ["notes/b.md"] = { wrote = true, after = "hello\n" } } }
+  text = observe.live(record)
+  assert(text:find('And the model answers "two notes"', 1, true), text)
+  assert(text:find("Then it stops with answered\n    And it takes 2 steps", 1, true), text)
+  assert(text:find('And the file "notes/b.md" holds:\n      """\n      hello', 1, true), text)
+  -- what it writes is real Gherkin
+  local pickles, why = gherkin.pickle("Feature: observed\n" .. text)
+  assert(pickles, why)
+end
+
 return T

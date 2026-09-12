@@ -4,16 +4,12 @@
 -- This is the PORT under it -- the thing that actually runs the line -- and the pair is
 -- the same split as `src/tools_fs.lua` over `double.fs`.
 --
--- It is called `shell` and never `bash`. It is eighteen commands and says which eighteen
--- in every refusal. A thing that is ninety per cent of bash is wrong in ways nobody can
--- predict, which is worse than a thing that is obviously small: a command this does not
--- have is REFUSED BY NAME with the list, and a refusal a model reads is a fact it can act
--- on, where a silent approximation is not.
+-- Called `shell` and never `bash`: it is eighteen commands and names which eighteen in
+-- every refusal. A command it does not have is REFUSED BY NAME with the list, never
+-- silently approximated.
 --
--- What this buys beyond isolation is DETERMINISM. The same script over the same
--- filesystem produces the same bytes every time -- every listing sorted, no clock, no
--- randomness, no environment. That is what makes two evals comparable and what lets a
--- change be attributed to a cause.
+-- Beyond isolation it buys DETERMINISM: the same script over the same filesystem produces
+-- the same bytes every time -- listings sorted, no clock, no randomness, no environment.
 --
 -- It requires the grammar and the port contract, and nothing else. Contract: spec/shell.md.
 
@@ -34,7 +30,7 @@ local shell = {}
 --- Bumped when a command changes what it answers.
 shell.VOCABULARY = 1
 
--- ------------------------------------------------------------------- small helpers
+-- small helpers
 
 local function lines_of(text)
   local out = {}
@@ -99,15 +95,12 @@ local function under(fs, root)
   return out
 end
 
--- ---------------------------------------------------------------------- the commands
+-- The commands: eighteen, and the list is the documentation. Each is
+-- `(c, argv, stdin) -> code, out, err` where `c` is `{ fs = ..., cwd = ... }`. A command
+-- that changes the working directory changes `c.cwd`, which is how `cd app && ls` works
+-- and why a `cd` cannot escape its line.
 --
--- Eighteen, and the list is the documentation. Each is `(c, argv, stdin) -> code, out, err`
--- where `c` is `{ fs = ..., cwd = ... }`. A command that changes the working directory
--- changes `c.cwd`, which is how `cd app && ls` works and why a `cd` cannot escape the
--- line it is on.
---
--- Flags are read positionally and an unknown flag is an ERROR, never ignored. A shell
--- that quietly drops `-r` is a shell that tells you it deleted a tree when it did not.
+-- Flags are read positionally and an unknown flag is an ERROR, never ignored.
 
 local COMMANDS = {}
 
@@ -167,7 +160,7 @@ COMMANDS["cd"] = function (c, argv)
 end
 
 COMMANDS["ls"] = function (c, argv)
-  -- `-a` and `-1` are accepted and change nothing, and that is a fact about this
+  -- `-a` and `-1` are accepted and change nothing, which is a fact about this
   -- filesystem rather than a shrug: nothing here is hidden, so `-a` has nothing extra to
   -- show, and the output is already one name per line. `spec/shell.md` says so, which
   -- makes it a promise rather than a coincidence somebody later relies on.
@@ -532,7 +525,7 @@ function shell.has(name)
   return COMMANDS[name] ~= nil
 end
 
--- ---------------------------------------------------------------------- running a line
+-- running a line
 
 -- One simple command, with its redirections. `stdin` is what the pipe before it wrote.
 local function run_simple(c, simple, stdin)

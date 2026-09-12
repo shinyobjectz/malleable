@@ -1,7 +1,7 @@
 -- The specs, as part of the suite that already runs.
 --
 -- `tools/spec-check.sh` prints the report; this is the same run, quietly, inside
--- `run-tests.lua`. Both, deliberately: a promise that only runs in a script somebody has
+-- `scripts/run-tests.lua`. Both, deliberately: a promise that only runs in a script somebody has
 -- to remember to call is a promise that rots, which is the exact failure the whole
 -- spec-as-feature idea exists to stop -- one level up from where it stopped it.
 

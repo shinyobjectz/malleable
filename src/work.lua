@@ -1,32 +1,27 @@
 -- work: the two records that make a long run trustworthy.
 --
--- A PLAN is the ordered list of items an agent states before it acts and marks off as
--- it goes, rendered as one plain block for the person and for the model. A CHECKPOINT
--- is the exact contents of the files a turn is about to touch, captured before the
--- edit, so the turn can be taken back. Undo restores those bytes; it does not merge,
--- diff or reconcile, and anything written to a captured path afterwards is gone.
+-- A PLAN is the ordered list an agent states before it acts and marks off as it goes,
+-- rendered as one block for the person and the model. A CHECKPOINT is the contents of the
+-- files a turn is about to touch, captured before the edit, so the turn can be taken back.
+-- Undo restores those bytes: it does not merge, diff or reconcile.
 --
 -- Two rules shape every function here.
 --
---   * A wrong argument type RAISES -- it is a bug in the calling code and it should
---     stop at the line that made it. A bad world RETURNS nil plus a reason string.
---     Nothing here ever answers false.
---   * The world is reached only through the fs slice of the port table: read, write,
---     remove, exists. No clock, no shell, no model, no approval channel, no store.
---     Checkpoint ids come from a counter, so two runs of a test agree byte for byte.
+--   * A wrong argument type RAISES; a bad world RETURNS nil plus a reason. Never false.
+--   * The world is reached only through the fs slice: read, write, remove, exists. No
+--     clock, shell, model, approval channel or store. Checkpoint ids come from a counter,
+--     so two runs of a test agree byte for byte.
 --
--- The one deliberate exception is work.undo, which always answers with a report and
--- never with nil: an abandoned half-restore leaves a workspace that matches neither
--- the checkpoint nor the turn, which is worse than a report that is honest about it.
+-- `work.undo` is the exception: it always answers with a report, never nil, because a
+-- half-restore matches neither the checkpoint nor the turn.
 --
--- This file stands alone. It names no sibling module and holds no module-level
--- mutable state, so two plans and two trails in one process share nothing.
+-- Names no sibling module and holds no module-level mutable state.
 
 local work = {}
 
 local fmt = string.format
 
--- ------------------------------------------------------------------ the constants
+-- the constants
 
 -- Kept privately as well as published, so a caller that writes into the published
 -- copy changes nothing but its own view.
@@ -50,12 +45,10 @@ local TRAIL_BYTES = 8388608
 -- The two published tables are read-only, by the strongest means each shape allows in
 -- both dialects this tree targets.
 --
--- `defaults` is read by key, so it is a proxy over hidden values and every write to it
--- raises. `states` is read with `#` and ipairs, and LuaJIT 5.1 answers neither __len
--- nor __index for those, so a proxy would make `#work.states` zero on one of the two
--- interpreters. It is a real list instead: a new key raises, while overwriting one of
--- the four slots is not catchable and changes nothing but the caller's own view, since
--- this module reads its own copy.
+-- `defaults` is read by key, so it is a proxy over hidden values and every write raises.
+-- `states` is read with `#` and ipairs, which LuaJIT 5.1 does not honour on a proxy, so it
+-- is a real list: a new key raises, and overwriting a slot changes only the caller's view
+-- because this module reads its own copy.
 local function sealed(values, what)
   return setmetatable({}, {
     __index = values,
@@ -81,7 +74,7 @@ work.defaults = sealed({
   cap       = LIMITS.cap,
 }, "work.defaults")
 
--- ------------------------------------------------------------------ small helpers
+-- small helpers
 
 -- Level 3: the sentence points at the line that made the mistake, not at this file.
 local function raise(what, ...)
@@ -129,7 +122,7 @@ local function plain(s)
   return (tostring(s):gsub("[^\32-\126]", "?"))
 end
 
--- ------------------------------------------------------------------- plan building
+-- plan building
 
 -- One entry, checked. Returns a prepared item without an id, or nil and the reason.
 local function read_entry(i, entry, max_text)
@@ -446,7 +439,7 @@ function work.render(plan, opts)
   return table.concat(out, "\n")
 end
 
--- ------------------------------------------------------------------- the port slice
+-- the port slice
 
 local FS_CALLS = { "read", "write", "remove", "exists" }
 
@@ -485,7 +478,7 @@ local function reason_of(err)
   return tostring(err)
 end
 
--- ------------------------------------------------------------------- checkpoints
+-- checkpoints
 
 function work.take(p, paths, opts)
   local fs = need_fs("work.take", p)
@@ -672,7 +665,7 @@ function work.describe(cp)
              bytes, bytes == 1 and "byte" or "bytes")
 end
 
--- ------------------------------------------------------------------------ the trail
+-- the trail
 
 function work.trail(opts)
   opts = opts_table("work.trail", opts)
@@ -760,7 +753,7 @@ function work.undo_last(p, trail)
   return work.undo(p, cp)
 end
 
--- ------------------------------------------------------------------- the two tools
+-- the two tools
 
 local TOOLS = { plan = true, mark = true }
 local INSTALL_KEYS = { plan = true, names = true, on_change = true, max_items = true, max_text = true }

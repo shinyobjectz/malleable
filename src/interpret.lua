@@ -1,16 +1,15 @@
 -- interpret — the surface a workspace extends the interpretive layer through.
 --
--- Canon: docs/PAGES.md "The four layers"; the rule kinds are mar-9cja, the refusals are
--- mar-i182 under mar-4o07. Rendered into `.work/rules/rules.lua` and read back by
+-- Canon: docs/PAGES.md "The four layers". Rendered into `.work/rules/rules.lua` and read
+-- back by
 -- canvas/rules.rs; the shapes here are ta_agent::spec::Rule's, field for field.
 --
 -- `agent` declares behaviour. `interpret` declares reading. One prefix each.
 --
--- THE DESIGN CONSTRAINT, and the reason the surface is shaped as it is: there is no field
--- anywhere below that can hold a regex. A mark is assembled from parts, the one part that
--- takes free text is escaped before it reaches a matcher, and every shape is a constant
--- held by identity rather than a string. A reading of ordinary language cannot be written
--- here at all: it belongs to the map, and `interpret.means` is where it goes.
+-- THE DESIGN CONSTRAINT: no field below can hold a regex. A mark is assembled from parts,
+-- the one part taking free text is escaped before it reaches a matcher, and every shape is
+-- a constant held by identity. A reading of ordinary language cannot be written here --
+-- it belongs to the map, through `interpret.means`.
 
 local interpret = {}
 
@@ -18,12 +17,9 @@ local function fail(fmt, ...)
   error(string.format(fmt, ...), 3)
 end
 
--- ---------------------------------------------------------------- the closed vocabularies
---
--- Every one of these is a table held by IDENTITY, never a string. A string field would let
--- an author write `shape = "[A-Za-z ]+"` and have it quietly work; a table cannot carry a
--- payload. A misspelling yields nil, and nil is refused at access (see the metatable at the
--- bottom of this file) rather than being mistaken for an omitted field.
+-- The closed vocabularies, each a table held by IDENTITY and never a string: a string field
+-- would let an author write `shape = "[A-Za-z ]+"` and have it quietly work. A misspelling
+-- yields nil, refused at access by the metatable at the bottom of this file.
 
 local function const(tag, name, extra)
   local t = { [tag] = true, name = name }
@@ -31,11 +27,10 @@ local function const(tag, name, extra)
   return t
 end
 
--- Each shape carries TWO renderings, and the distinction is not cosmetic: `pattern` is a
--- Lua pattern, used here and by gate two to match text in this process; `rust` is a Rust
--- regex, which is what the store's `pattern` field is compiled as by the harness. Emitting
--- the Lua form into the store would fail SILENTLY - `%$tired` as a Rust regex is a literal
--- percent, an end-of-line anchor and then "tired", which matches nothing at all.
+-- Each shape carries TWO renderings. `pattern` is a Lua pattern, matched in this process;
+-- `rust` is a Rust regex, which is what the store's `pattern` field compiles as. Emitting
+-- the Lua form into the store fails SILENTLY: `%$tired` as a Rust regex is a literal
+-- percent, an end-of-line anchor and "tired", matching nothing.
 interpret.SHOUTED = const("__shape", "SHOUTED", { pattern = "%u[%u%d_]*", rust = "[A-Z][A-Z0-9_]*", human = "an all-capitals word" })
 interpret.WORD    = const("__shape", "WORD",    { pattern = "%a[%w_%-]*", rust = "[A-Za-z][A-Za-z0-9_-]*", human = "a word" })
 interpret.NUMBER  = const("__shape", "NUMBER",  { pattern = "%d+",        rust = "\\d+", human = "a whole number" })
@@ -66,7 +61,7 @@ local function tagged(v, tag)
   return type(v) == "table" and v[tag] == true
 end
 
--- --------------------------------------------------------------------------- the guards
+-- the guards
 
 -- Every Lua and Rust pattern metacharacter, quoted. The `word` field is a literal and is
 -- never compiled: this is what stops an author reaching the engine through the one field
@@ -88,7 +83,7 @@ local function refuse_pattern_fields(t, what)
     if t[k] ~= nil then
       fail("%s: `%s` is not a field here and never will be. interpret accepts no pattern - assemble a "
         .. "mark from `lead`, `word` and `shape`, or use interpret.means for something the map can "
-        .. "already see (mar-i182)", what, k)
+        .. "already see", what, k)
     end
   end
 end
@@ -164,9 +159,7 @@ local function check_body(body, what)
   end
 end
 
--- ------------------------------------------------------------------------ the collection
---
--- A file declares many rules. They accumulate in order so the rendered module is stable
+-- The collection. Rules accumulate in declaration order so the rendered module is stable
 -- between Builds, which is what makes a diff of `.work/rules/rules.lua` readable.
 
 local function new_book()
@@ -196,7 +189,7 @@ function interpret.reset()
   book = new_book()
 end
 
--- ---------------------------------------------------------------------------- the surface
+-- the surface
 
 local function head(t, name, what)
   if type(name) ~= "string" or name == "" then fail("%s needs a name", what) end
@@ -364,40 +357,29 @@ function interpret.lint(name)
   end
 end
 
--- ------------------------------------------------------------------------------- gate two
+-- Gate two. The syntax gate cannot catch a mark whose span happens to be language on some
+-- page, so the rendered mark is tested against what the parse aligned and a mark covering
+-- a span the map gave a graph node is refused, naming the aligned word.
 --
--- The syntax gate cannot catch a mark whose span happens to be language on some page. So
--- the rendered mark is tested against what the parse aligned, and a mark covering a span
--- the map gave a graph node is refused with the aligned word named.
---
--- `aligned` is a list of { text = <the page's bytes>, word = <the aligned word>, node = <var> }
--- handed in by the host; this function is pure so it can be tested with no parser.
+-- `aligned` is a list of { text, word, node } handed in by the host; this function is pure,
+-- so it tests with no parser.
 
 --- Which declared rules the map can already read, and therefore may not be declared here.
 ---
---- The question is SPAN OVERLAP, not text matching, and the difference is the whole gate.
---- Testing a mark's pattern against an aligned node's own text almost never fires: the
---- aligner's spans rarely include the sigil a mark must lead with, so `%$tired` does not match
---- the aligned word "tired". Measured over seven real parses: 10 of 311 aligned spans contain
---- an at-sign or a dollar, so text matching would miss 97 per cent of collisions and report a
---- clean result. A gate that passes almost everything is worse than no gate, because it is
---- believed.
+--- The question is SPAN OVERLAP, not text matching. A mark's pattern tested against an
+--- aligned node's text almost never fires, because the aligner's spans rarely include the
+--- sigil a mark leads with. So the mark is fired against the PAGE and each place it fires
+--- is checked against every aligned span; overlap means the map can already read it.
 ---
---- So the mark is fired against the PAGE, and each place it fires is checked against every
---- span the parse aligned. A mark whose extent overlaps an aligned node is covering language
---- the map can already read.
----
---- `text` is the page. `aligned` is a list of { node, word, from, to } in the same offset
---- convention as the page is indexed - character offsets, which is what the aligner emits
---- (mar-hldj: 278 of 278 correct by character, 140 of 278 by byte).
+--- `text` is the page. `aligned` is a list of { node, word, from, to } in CHARACTER
+--- offsets, which is what the aligner emits and how the page is indexed.
 ---
 --- Returns a list of { name, word, node, at, why }; empty when every mark is genuinely
 --- notation. A rule with no `matches` (interpret.means) is never refused: it declared no
 --- pattern, which is the point of it.
 function interpret.refused_by_map(rules, text, aligned)
   if type(text) == "table" then
-    -- the two-argument form used to take (rules, aligned) and match text against text. It
-    -- could not fire, so it is refused rather than quietly doing nothing.
+    -- The two-argument form cannot fire, so it is refused rather than quietly doing nothing.
     error("interpret.refused_by_map(rules, text, aligned): the page's own text is needed, because "
       .. "the gate is span overlap and not text matching - an aligned span never contains the "
       .. "sigil a mark leads with", 2)
@@ -431,11 +413,9 @@ function interpret.refused_by_map(rules, text, aligned)
   return out
 end
 
--- -------------------------------------------------------------------------------- render
---
--- To ta_agent::spec::Rule, field for field, ready for serde. Only the fields the Rust reads
--- are emitted; `says`, `lead`, `word`, `shape`, `phrase` and `by` are the author's own
--- record and stay out of the store.
+-- Render to ta_agent::spec::Rule, field for field, ready for serde. Only the fields the
+-- Rust reads are emitted; `says`, `lead`, `word`, `shape`, `phrase` and `by` are the
+-- author's own record and stay out of the store.
 
 local RUST_FIELDS = { "name", "kind", "is", "pattern", "to", "sparql", "flag",
                       "message", "repair", "advisory", "body", "binds", "mode" }
@@ -465,15 +445,10 @@ function interpret.book()
   return out
 end
 
--- ------------------------------------------------------------------------------ the load
---
--- A workspace's rules file is GENERATED Lua, and generated Lua is untrusted (ruled
--- 2026-09-04, after a model's middle ran curl on this Mac during an eval). So a declaration
--- is evaluated with no filesystem, no process, no network and no way to reach one.
---
--- This mirrors what ta-agent's Rust loader does for an agent: drop io and os, empty
--- package.path so `require` cannot search the disk, and remove dofile and loadfile, which
--- would put back the escape that dropping io just closed.
+-- The load. A workspace's rules file is GENERATED Lua, and generated Lua is untrusted. A declaration
+-- is evaluated with no filesystem, no process, no network and no way to reach one: io and
+-- os dropped, package.path emptied so `require` cannot search the disk, and dofile and
+-- loadfile removed, which would otherwise put back the escape that dropping io closed.
 --
 -- Rule 2 of the surface holds here: LOADING RUNS NOTHING. A declaration builds tables. A
 -- law's or a lint's `body` is carried as SOURCE TEXT and is never compiled by this function,
@@ -520,7 +495,7 @@ function interpret.load(chunk, name)
   return interpret.book(), nil
 end
 
--- ------------------------------------------------------------------------------- the file
+-- the file
 --
 -- `.work/rules/rules.lua` as canvas/rules.rs renders it. Rendered, never authored: an edit
 -- to that file is lost on the next Build. This is here so the surface can be checked
@@ -610,7 +585,7 @@ function interpret.render_file()
   return table.concat(out)
 end
 
--- ------------------------------------------------------------------ the surface is closed
+-- the surface is closed
 --
 -- A misspelled constant must not arrive as `nil`. In Lua `interpret.SHOUTD` and an omitted
 -- field are the same value, so a typo would be reported as "you forgot a shape" - which

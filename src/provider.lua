@@ -1,33 +1,26 @@
 -- provider -- model providers and adapters.
 --
--- `spec/port.md` defines a model port, `p.model.call(request) -> reply | nil, err`,
--- and supplies a scripted double for it. This is the other implementation of that same
--- port: the one that turns the harness's vendor-neutral request into what a real model
--- API expects, sends it, and turns the answer back into the port's reply shape. It
--- knows about wire formats, tool schema serialisation, HTTP statuses and retry, and
--- that is the whole reason it exists -- so that nothing above it has to.
+-- The real implementation of the model port `p.model.call(request) -> reply | nil, err`:
+-- it turns the harness's vendor-neutral request into what a model API expects, sends it,
+-- and turns the answer back. Wire formats, tool schema serialisation, HTTP statuses and
+-- retry live here so that nothing above has to.
 --
--- It still opens no socket. The transport arrives as a port function, so every
--- behaviour here, timeouts and rate limits included, is proved in a test with no
--- network, no disk and no subprocess.
+-- It opens no socket. The transport arrives as a port function, so every behaviour here
+-- is proved without network, disk or subprocess.
 --
--- Three results, and keeping them apart is the point of the file:
+-- Three results, kept apart:
 --
 --   a reply    the API answered and the model produced something -> reply, nil
 --   a refusal  the model declined -- a REPLY, stop = "refused", never retried
 --   a failure  no reply was produced                             -> nil, err
 --
--- And port.md's one convention, unchanged: a wrong shape RAISES, a wrong world
--- RETURNS. A number where a message list belongs stops the program; an empty
--- transcript, an unknown scheme, a 503 or a model that emitted broken JSON comes back
--- as a value the caller reads.
+-- port.md's convention holds: a wrong shape RAISES, a wrong world RETURNS.
 --
--- What it must not do, from `spec/provider.md` §10: it names nothing in the `os` or
--- `io` libraries, takes no random number, opens no socket, writes no global, reads no
--- environment variable for a credential, mutates no `request`, prints nothing, falls
--- back to no second model, streams nothing and caches nothing -- and it never decides
--- what a failure means for the run. A test reads this file for those names. It
--- requires `src/port.lua` and its own submodules, and nothing else in the tree.
+-- What it must not do (spec/provider.md §10, and a test reads this file for the names):
+-- name nothing in `os` or `io`, take no random number, open no socket, write no global,
+-- read no environment variable for a credential, mutate no `request`, print nothing, fall
+-- back to no second model, stream nothing, cache nothing, and never decide what a failure
+-- means for the run. It requires `src/port.lua` and its own submodules, nothing else.
 
 local port = require "port"
 
@@ -44,7 +37,7 @@ local provider = {}
 
 provider.json = json
 
--- ------------------------------------------------------------------------ small tools
+-- small tools
 
 local function copy(t)
   local out = {}
@@ -63,9 +56,9 @@ local function nonempty(v)
   return nil
 end
 
--- ------------------------------------------------------------------------ model ids
+-- model ids
 
--- `"openrouter:inception/mercury-2.5"` is a scheme and a name, split on the FIRST
+-- `"openrouter:z-ai/glm-5.3"` is a scheme and a name, split on the FIRST
 -- colon. A bare `"gpt-4o"` is not a model id here: the scheme is how an adapter is
 -- chosen, and guessing a default vendor from a bare name is how a key ends up at the
 -- wrong host.
@@ -75,7 +68,7 @@ function provider.parse_model(id)
   end
   local at = id:find(":", 1, true)
   if not at then
-    return nil, string.format("%q names no provider: a model id reads \"<scheme>:<name>\", like \"openrouter:inception/mercury-2.5\"", id)
+    return nil, string.format("%q names no provider: a model id reads \"<scheme>:<name>\", like \"openrouter:z-ai/glm-5.3\"", id)
   end
   local scheme = id:sub(1, at - 1)
   local name = id:sub(at + 1)
@@ -88,7 +81,7 @@ function provider.parse_model(id)
   return scheme, name
 end
 
--- ------------------------------------------------------------------------- adapters
+-- adapters
 
 local adapters = {}
 
@@ -134,7 +127,7 @@ end
 provider.adapter("openai", openai_chat.new("https://api.openai.com/v1"))
 provider.adapter("openrouter", openai_chat.new("https://openrouter.ai/api/v1"))
 
--- ---------------------------------------------------------------------- the config
+-- the config
 
 local retry_defaults = { attempts = 3, base = 0.5, factor = 2, cap = 8, jitter = false }
 
@@ -241,7 +234,7 @@ local function read_scheme(name, given, impl)
   return sc
 end
 
--- ------------------------------------------------------------------------- secrets
+-- secrets
 
 -- A comparison against the configured secret, not a search for anything that looks
 -- like one. If the API echoed the key into an error body, the body is withheld.
@@ -283,7 +276,7 @@ local function scrub_body(s, secrets)
   return s
 end
 
--- --------------------------------------------------------------------- the model port
+-- the model port
 
 local function fail_shape(where, what, ...)
   error(where .. ": " .. string.format(what, ...), 3)

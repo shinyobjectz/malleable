@@ -11,15 +11,15 @@
 --   3. Inspectable. Each double records what it was asked on a plain list field a test
 --      reads directly -- m.seen, f.wrote, s.ran, c.slept, a.asked, l.lines.
 --
--- Nothing here answers a question it was not taught. An unscripted command, an
--- exhausted script and an unlisted tool are all stated failures, never a benign
--- default: a double that agrees with everything turns a broken agent into a green test.
+-- Nothing answers a question it was not taught: an unscripted command, an exhausted script
+-- and an unlisted tool are stated failures, never a benign default.
 
 local port = require "port"
 
 -- The executor, for `double.world { shell = true }`. Reached through this module rather
 -- than required by every caller of it, so a whole world stays one call.
 local shell_module = require "shell"
+local store_module = require "store"
 
 local double = {}
 
@@ -39,7 +39,7 @@ local function copy_list(t)
   return out
 end
 
--- ---------------------------------------------------------------- the scripted model
+-- the scripted model
 
 local stops = { done = true, calls = true, cut = true, refused = true }
 
@@ -171,7 +171,7 @@ function double.model(cfg)
   return m
 end
 
--- ------------------------------------------------------- the in-memory filesystem
+-- the in-memory filesystem
 
 function double.fs(cfg)
   if cfg == nil then cfg = {} end
@@ -325,7 +325,7 @@ function double.fs(cfg)
   return f
 end
 
--- ---------------------------------------------------------------- the scripted shell
+-- the scripted shell
 
 function double.sh(cfg)
   if cfg == nil then cfg = {} end
@@ -401,7 +401,7 @@ function double.sh(cfg)
   return s
 end
 
--- ------------------------------------------------------------------ the frozen clock
+-- the frozen clock
 
 function double.clock(cfg)
   if cfg == nil then cfg = {} end
@@ -439,7 +439,7 @@ function double.clock(cfg)
   return c
 end
 
--- ----------------------------------------------------- the scripted approval channel
+-- the scripted approval channel
 
 function double.ask(cfg)
   local a = { asked = {} }
@@ -494,13 +494,22 @@ function double.ask(cfg)
     end
 
     if type(d) ~= "table" or type(d.allow) ~= "boolean" then return no_answer() end
-    return { allow = d.allow, why = d.why, remember = d.remember }
+    -- `args`: what the person changed before approving, for a tool that lets them edit.
+    return { allow = d.allow, why = d.why, remember = d.remember,
+             args = type(d.args) == "table" and copy(d.args) or nil }
   end
 
   return a
 end
 
--- --------------------------------------------------------------- the recording sink
+-- A program's stores, held in memory: { name = { row, ... } }. The same port the console
+-- holds until its host writes one to disk; `changes` lists every write, in order.
+function double.store(cfg)
+  if cfg ~= nil and type(cfg) ~= "table" then error("double.store takes { name = { row, ... } }", 2) end
+  return store_module.memory(cfg)
+end
+
+-- the recording sink
 
 local levels = { debug = true, info = true, warn = true, error = true }
 
@@ -532,16 +541,15 @@ function double.log()
   return l
 end
 
--- ------------------------------------------------------------------- the whole world
+-- the whole world
 
 -- Each field builds one double; a field left out gets an empty one, and an empty one
 -- refuses rather than agrees. A field that is already a built double is taken as is,
 -- so a test can hand one double to two worlds on purpose.
--- --------------------------------------------------------------- the three seams
---
--- The world the newer seams need. Each is the smallest thing that can stand where a
--- real one will: a table of procedures, a table that remembers across a restart it
--- never has, and a server that is a table of functions.
+
+-- The three seams. Each is the smallest thing that can stand where a real one will: a
+-- table of procedures, a table that remembers across a restart it never has, and a server
+-- that is a table of functions.
 
 -- The workspace's skills. `cfg` is name -> text, or name -> { about, does }.
 function double.skills(cfg)
@@ -572,9 +580,8 @@ function double.skills(cfg)
   return d
 end
 
--- The durable record, without the durability. It survives nothing, which is exactly
--- what makes it useful in a test: a run's whole memory is visible as a table, and
--- `double.ledger(previous.held)` is a restart.
+-- The durable record, without the durability: it survives nothing, so a run's whole memory
+-- is visible as a table and `double.ledger(previous.held)` is a restart.
 function double.ledger(cfg)
   if cfg == nil then cfg = {} end
   if type(cfg) ~= "table" then error("double.ledger takes a table, got " .. type(cfg), 2) end
@@ -627,6 +634,58 @@ local function built(v, fn)
   return type(v) == "table" and type(v[fn]) == "function"
 end
 
+--- A history port in memory (spec/history.md): files by path, the runs claimed, and where
+--- the workspace is. `cfg.where` overrides the place; `cfg.fail` makes every write fail,
+--- for the tests that a failed write leaves a run alone.
+function double.history(cfg)
+  cfg = cfg or {}
+  local h = { files = {}, claimed = {} }
+  local where = cfg.where or { worktree = "work", git_branch = "main", commit = "abc1234", offset = 0 }
+  local function path_ok(p) return type(p) == "string" and p ~= "" and not p:find("%.%.") and p:sub(1, 1) ~= "/" end
+  function h.where() return where end
+  function h.claim(id)
+    if type(id) ~= "string" or id == "" then return false end
+    if h.claimed[id] then return false end
+    h.claimed[id] = true
+    return true
+  end
+  function h.write(p, text)
+    if cfg.fail then return nil, "the history is not writable" end
+    if not path_ok(p) or type(text) ~= "string" then return nil, "a path and a text" end
+    h.files[p] = text
+    return true
+  end
+  function h.append(p, text)
+    if cfg.fail then return nil, "the history is not writable" end
+    if not path_ok(p) or type(text) ~= "string" then return nil, "a path and a text" end
+    h.files[p] = (h.files[p] or "") .. text
+    return true
+  end
+  function h.read(p)
+    local t = h.files[p]
+    if t == nil then return nil, "no such file" end
+    return t
+  end
+  function h.list(dir)
+    local prefix = (dir == nil or dir == "") and "" or (dir:gsub("/+$", "") .. "/")
+    local seen, out = {}, {}
+    local function add(rest)
+      local name = rest:match("^([^/]+)")
+      if name and not seen[name] then seen[name] = true; out[#out + 1] = name end
+    end
+    for p in pairs(h.files) do
+      if p:sub(1, #prefix) == prefix then add(p:sub(#prefix + 1)) end
+    end
+    for id in pairs(h.claimed) do
+      local p = "runs/" .. id
+      if p:sub(1, #prefix) == prefix then add(p:sub(#prefix + 1)) end
+    end
+    table.sort(out)
+    return out
+  end
+  return h
+end
+
 function double.world(cfg)
   if cfg == nil then cfg = {} end
   if type(cfg) ~= "table" then
@@ -645,13 +704,12 @@ function double.world(cfg)
 
   local fs = built(cfg.fs, "read") and cfg.fs or double.fs(cfg.fs)
 
-  -- `shell = true` swaps the scripted shell for the executor in `src/shell.lua`, over
-  -- THIS world's own filesystem -- so `echo x > a.txt` is a file the next `fs.read` finds.
+  -- `shell = true` swaps the scripted shell for the executor in `src/shell.lua`, over THIS
+  -- world's own filesystem, so `echo x > a.txt` is a file the next `fs.read` finds.
   --
-  -- Opt-in, and it stays opt-in. A world that quietly ran commands nobody scripted would
-  -- make a test pass for a reason the test did not state, and "nothing is scripted for
-  -- that" is the most useful sentence a test double ever says. `agent.sandbox` is the
-  -- door that turns it on, because an EMBEDDER wants the opposite default from a test.
+  -- Opt-in, and it stays opt-in: a world that quietly ran unscripted commands would make a
+  -- test pass for a reason it did not state. `agent.sandbox` turns it on, because an
+  -- embedder wants the opposite default from a test.
   local sh
   if built(cfg.sh, "run") then
     sh = cfg.sh
@@ -668,14 +726,13 @@ function double.world(cfg)
     clock = built(cfg.clock, "now")     and cfg.clock or double.clock(cfg.clock),
     ask   = built(cfg.ask, "request")   and cfg.ask   or double.ask(cfg.ask),
     log   = built(cfg.log, "write")     and cfg.log   or double.log(),
-    -- The three later ports are OPTIONAL, and a world builds one only when the test
-    -- asks for it. `port.check` does not require them, and an agent that declares no
-    -- skill, no beat and no server must not be handed three doubles it will never
-    -- call -- a world with more in it than the run uses is a world whose tests pass
-    -- for reasons the test did not state.
+    -- The three later ports are OPTIONAL, built only when the test asks. An agent that
+    -- declares no skill, beat or server is not handed three doubles it will never call.
     skills = cfg.skills ~= nil and (built(cfg.skills, "read") and cfg.skills or double.skills(cfg.skills)) or nil,
     ledger = cfg.ledger ~= nil and (built(cfg.ledger, "get")  and cfg.ledger or double.ledger(cfg.ledger)) or nil,
     mcp    = cfg.mcp    ~= nil and (built(cfg.mcp, "call")    and cfg.mcp    or double.mcp(cfg.mcp))    or nil,
+    -- A program's stores, in memory: { name = { row, ... } } (src/store.lua).
+    store  = cfg.store  ~= nil and (built(cfg.store, "read")  and cfg.store  or double.store(cfg.store)) or nil,
   }
 end
 

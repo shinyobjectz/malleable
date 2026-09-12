@@ -10,19 +10,18 @@
 -- Nothing is a GAP -- counted, reported, filed against the vocabulary, never repaired by
 -- widening a pattern. A run whose commands are 40% unnamed says 40%.
 --
--- That split is what keeps mar-4o07 satisfied. It bans a phrase reader over PROSE, where
--- the corpus is written in the compiler's own dialect and a word list passes its tests by
--- tautology. Here the language is closed and formal, the parse is total, and only the
--- NAMING is partial -- with the partiality on the report instead of in a silence.
+-- The split is what makes this legitimate where a phrase reader over PROSE is not: the
+-- language is closed and formal, the parse is total, and only the NAMING is partial --
+-- with the partiality on the report instead of in a silence.
 --
 -- It requires nothing. Contract: spec/command.md. Amend that before this diverges.
 
 local command = {}
 
--- ------------------------------------------------------------------ the terms
+-- the terms
 --
 -- Closed, and it stays small. The test of a term is that a Then line can FAIL on it.
--- `publishes`, `escalates`, `deletes` and `connects` are the ones worth having: an
+-- `publishes`, `escalates`, `deletes` and `connects` carry the weight: an
 -- agent that inspects a lot is working, and an agent that publishes is doing the thing
 -- nobody can undo for it. No token count says that.
 
@@ -49,7 +48,7 @@ function command.known(term)
   return KNOWN[term] == true
 end
 
--- ------------------------------------------------------------------ the grammar
+-- the grammar
 --
 -- Word splitting with quoting, the five operators that join simple commands, and
 -- redirections. Nothing is expanded, substituted, globbed or evaluated: `rm -rf $TARGET`
@@ -200,12 +199,9 @@ function command.parse(line)
   return out
 end
 
--- ------------------------------------------------------------------ the naming
---
--- A table of programs, and it is PARTIAL on purpose. A program not here is a gap, and the
--- gap is the number. Widening this table is how the vocabulary grows and is a change
--- somebody makes deliberately after reading a report -- never a pattern loosened to make
--- one line pass.
+-- The naming: a table of programs, PARTIAL on purpose. A program not here is a gap, and
+-- the gap is the number. Widening this table is a deliberate change made after reading a
+-- report, never a pattern loosened to make one line pass.
 --
 -- Two shapes. A program whose whole job is one act names the act. A program with
 -- subcommands -- git, npm, cargo, docker -- names a table keyed by the subcommand, with
@@ -263,9 +259,11 @@ local BY_SUBCOMMAND = {
     clone = "connects", fetch = "connects", pull = "connects",
   },
   npm = {
-    test = "tests", install = "installs", ci = "installs",
+    test = "tests", install = "installs", i = "installs", add = "installs", ci = "installs",
+    uninstall = "installs", init = "writes", pkg = "writes",
     build = "builds", run = nil,   -- `npm run <script>` is named by the script
     publish = "publishes",
+    exec = nil,                    -- `npm exec <program>`, like npx: named by the program
   },
   yarn = { test = "tests", install = "installs", build = "builds", publish = "publishes" },
   pnpm = { test = "tests", install = "installs", build = "builds", publish = "publishes" },
@@ -415,7 +413,21 @@ function command.act(simple)
         local named = BY_SCRIPT_NAME[argv[k + 1]:lower()]
         if named then return named end
       end
+      -- `npm exec vitest`, like `npx vitest` below: named by the program it runs.
+      if sub == "exec" and program == "npm" and type(argv[k + 1]) == "string" then
+        return BY_PROGRAM[argv[k + 1]]
+      end
     end
+    return nil
+  end
+
+  -- `npx vitest run`, `npx tsc --noEmit`: npx runs a package's program, and the line is
+  -- named by that program, exactly as the program would be on its own. Found by the
+  -- long-task eval, where every test and build the model ran went through npx.
+  if program == "npx" then
+    local k = at + 1
+    while type(argv[k]) == "string" and argv[k]:sub(1, 1) == "-" do k = k + 1 end
+    if type(argv[k]) == "string" then return BY_PROGRAM[argv[k]] end
     return nil
   end
 
@@ -427,9 +439,8 @@ end
 
 --- Every act in one line, with what could not be placed.
 ---
---- `unplaced` is the number that goes on a report. It is the whole point of the partial
---- half: a reader that answered a term for everything would be a reader nobody could
---- check.
+--- `unplaced` is the number that goes on a report: a reader that answered a term for
+--- everything would be a reader nobody could check.
 function command.acts(line)
   local parsed, why, where = command.parse(line)
   if not parsed then

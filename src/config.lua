@@ -1,14 +1,11 @@
 -- config: configuration, profiles and secrets.
 --
--- Everything the harness needs before it can run arrives from four places -- built-in
--- defaults, any number of configuration files, the environment, and the explicit
--- overrides a host passes in -- and this module is the one that decides which of them
--- wins. Every resolved value can name the layer it came from, because a configuration
--- you cannot explain is one you cannot debug.
+-- Four layers -- built-in defaults, configuration files, the environment, explicit host
+-- overrides -- and this module decides which wins. Every resolved value can name the layer
+-- it came from.
 --
--- Secrets are the exception that shapes the module: they arrive from the environment
--- and nowhere else, and they never appear in the returned table, in a report, in a
--- problem, in a raised sentence or in `tostring`. The only door they leave by is
+-- Secrets arrive from the environment and nowhere else, and never appear in the returned
+-- table, a report, a problem, a raised sentence or `tostring`. The only door out is
 -- `config.secret`.
 --
 -- The two-channel convention, as everywhere in this tree:
@@ -16,14 +13,11 @@
 --   * a wrong shape RAISES  -- a schema, an opts key, a Lua type: the author can see it
 --   * a wrong world RETURNS -- nil, problems for a file, a variable or a value
 --
--- It reaches nothing real. No environment, no disk, no clock, no subprocess: the
--- environment arrives through `port.env` and a file through `port.fs`, so a whole
--- resolution runs in a test with nothing wired but tables. It requires no other module
--- in this tree.
+-- Reaches nothing real: the environment arrives through `port.env` and a file through
+-- `port.fs`, so a whole resolution runs on tables. Requires no other module in this tree.
 
 local config = {}
 
--- ---------------------------------------------------------------------------
 -- Small helpers.
 
 local function trim(s)
@@ -124,7 +118,6 @@ local function closest(name, candidates)
   return best
 end
 
--- ---------------------------------------------------------------------------
 -- The kinds. There are four, and there will not be a fifth without a line in
 -- spec/config.md: a configuration format that grows a type system grows a parser.
 
@@ -181,11 +174,8 @@ local function out_of_range(setting, value)
   return nil
 end
 
--- ---------------------------------------------------------------------------
--- The built-in settings, exported as data so a host extends them rather than
--- reproducing them. Nothing here is required: a declaration file may supply the model,
--- and a config that refused to resolve without one would break every agent that
--- already says what model it wants.
+-- The built-in settings, exported as data so a host extends them rather than reproducing
+-- them. Nothing here is required: a declaration file may supply the model.
 
 config.settings = {
   { name = "model", kind = "string", about = "the model id to call",
@@ -212,7 +202,6 @@ config.settings = {
     env = { "PI_API_KEY", "OPENROUTER_API_KEY" } },
 }
 
--- ---------------------------------------------------------------------------
 -- config.schema
 
 local DEF_KEYS = {
@@ -403,14 +392,10 @@ function config.schema(defs)
   }, "config.schema")
 end
 
--- ---------------------------------------------------------------------------
--- config.parse -- the file format.
---
--- Text that is parsed, never code that is run. There is no expression, no
--- interpolation, no include, no environment substitution and no arithmetic, so a
--- hostile configuration file has nothing to be hostile with. `parse` knows nothing
--- about settings, so an unknown key is not its problem; it reports only what is not a
--- well-formed file.
+-- config.parse -- the file format. Text that is parsed, never code that is run: no
+-- expression, interpolation, include, environment substitution or arithmetic, so a hostile
+-- configuration file has nothing to be hostile with. `parse` knows nothing about settings,
+-- so an unknown key is not its problem.
 
 local MAX_LINES = 4096
 
@@ -564,13 +549,10 @@ local function declared_in(tree)
   return out
 end
 
--- ---------------------------------------------------------------------------
--- The resolved store.
---
--- The values do not live in `c`. They live here, keyed by `c` itself and weak in that
--- key, so a dropped config is collectable. This is not decoration: it means pairs(c),
--- a JSON encoder walking c, a debug print, a deep copy into a session file and a crash
--- dump all see four fields and no credential.
+-- The resolved store. Values do not live in `c` but here, keyed by `c` and weak in that
+-- key, so a dropped config is collectable -- and so pairs(c), a JSON encoder, a debug
+-- print, a deep copy into a session file and a crash dump all see four fields and no
+-- credential.
 
 local store = setmetatable({}, { __mode = "k" })
 
@@ -675,7 +657,6 @@ local function tally(st)
   frozen(st.warnings, "the warnings")
 end
 
--- ---------------------------------------------------------------------------
 -- config.load
 
 function config.load(opts)
@@ -905,10 +886,9 @@ function config.load(opts)
     table.sort(declared)
 
     -- `opts.profile` is applied as a value of the profile setting in the override layer,
-    -- so a profile written straight into `opts.override` is the same statement made
-    -- another way, and it has to choose the profile too. Otherwise `explain` would name
-    -- the override as the layer that chose a profile that was never selected, and a
-    -- typo there would run the defaults in silence -- the bug this module is against.
+    -- so a profile written straight into `opts.override` is the same statement another way
+    -- and must choose the profile too. Otherwise `explain` names the override as the layer
+    -- that chose a profile never selected, and a typo runs the defaults in silence.
     local ps = schema.by_name.profile
     local forced = opts.profile
     if forced == nil and opts.override ~= nil then forced = opts.override.profile end
@@ -1167,7 +1147,6 @@ function config.load(opts)
   return finish(st)
 end
 
--- ---------------------------------------------------------------------------
 -- Reading a resolved config.
 
 -- The value that won, already read back into the setting's kind. Returns the default
@@ -1319,12 +1298,9 @@ function config.profiles(c)
   return list_of(st.profiles)
 end
 
--- ---------------------------------------------------------------------------
--- config.redact
---
--- A comparison against the configured secrets, not a search for anything that looks
--- like a credential. Plain text matching, never a pattern: a credential holding a
--- percent sign or a dash must not become a Lua pattern.
+-- config.redact: a comparison against the configured secrets, not a search for anything
+-- that looks like a credential. Plain text matching, never a pattern -- a credential
+-- holding a percent sign or a dash must not become one.
 
 local REDACTED = "[redacted]"
 local MAX_DEPTH = 16
@@ -1381,7 +1357,6 @@ function config.redact(c, v)
   return scrub(v, needles, 1, {})
 end
 
--- ---------------------------------------------------------------------------
 -- config.with -- a derived config with one more explicit layer on top.
 
 function config.with(c, override)

@@ -1,19 +1,18 @@
 -- subagent — a tool that runs a whole agent and hands back one result.
 --
--- A tool body sometimes needs an agent rather than a function: a job with its own
--- instructions, its own small tool set and its own transcript, run to completion,
--- whose answer comes back as one tool result the parent model reads.
+-- For a job with its own instructions, tool set and transcript, run to completion, whose
+-- answer comes back as one tool result the parent model reads.
 --
--- Two things live here and nowhere else in the tree:
+-- Two things live here and nowhere else:
 --
 --   * the depth and step accounting that bounds a whole tree of runs, held in a
 --     ledger the caller owns, so two trees through one loaded copy of this module
 --     cannot see each other;
 --   * the rendering that turns a finished child into the sentence its parent reads.
 --
--- What does NOT live here: a port call of any kind. This file never reads a file,
--- never asks a person, never reads a clock and never calls a model. It hands a port
--- table to turn.run and reads the result. The one module it requires is turn.
+-- No port call of any kind lives here: this file never reads a file, asks a person, reads
+-- a clock or calls a model. It hands a port table to turn.run and reads the result. The
+-- one module it requires is turn.
 
 local turn = (function ()
   local ok, m = pcall(require, "turn")
@@ -23,7 +22,7 @@ end)()
 
 local subagent = {}
 
--- ------------------------------------------------------------------- constants
+-- constants
 
 local DEFAULTS = {
   budget     = 12,
@@ -54,7 +53,7 @@ subagent.blocks = fixed {
 
 local INCLUDES = { answer = true, readout = true, none = true }
 
--- ---------------------------------------------------------------- small helpers
+-- small helpers
 
 local function fail(level, what, ...)
   error(string.format(what, ...), level + 1)
@@ -162,7 +161,7 @@ local function clip_line(s, max)
   return clip(s, max, " ")
 end
 
--- ------------------------------------------------------------------- the ledger
+-- the ledger
 
 local function ledger_why(kind, depth, children, steps, want_depth)
   if kind == "depth" then
@@ -298,7 +297,7 @@ local function usable_ledger(v)
   return ok and type(s) == "table"
 end
 
--- -------------------------------------------------------------------- the frame
+-- the frame
 
 -- The permit's travelling half: what a grandchild finds on its port, and what makes
 -- recursion accounted rather than merely deep.
@@ -310,7 +309,7 @@ function subagent.frame(ctx)
   return f
 end
 
--- ------------------------------------------------------------------ the readout
+-- the readout
 
 local function role_line(m)
   local role = type(m.role) == "string" and m.role or "?"
@@ -388,7 +387,7 @@ function subagent.readout(result, opts)
   return out
 end
 
--- ---------------------------------------------------------------- the rendering
+-- the rendering
 
 local function last_words(result)
   local t = peek(result, "transcript")
@@ -498,7 +497,7 @@ function subagent.render(result, opts)
   return head
 end
 
--- --------------------------------------------------------------------- the run
+-- the run
 
 local RUN_KEYS = {
   agent = true, prompt = true, budget = true, label = true, world = true,
@@ -783,10 +782,9 @@ function subagent.run(ctx, req)
     notes   = notes,
     err     = r.err,
     -- What the child DID, as its own tree. Carried back rather than dropped, so the
-    -- parent's turn can hang it under the `execute_tool` span that started it: a
-    -- delegating agent is exactly the one whose behaviour cannot be reconstructed by
-    -- reading the code (mar-gogg). It travels as data and this file does nothing with
-    -- it -- no clock, no ids, no re-parenting, all of which belong to whoever adopts it.
+    -- parent's turn can hang it under the `execute_tool` span that started it. It travels
+    -- as data and this file does nothing with it -- no clock, no ids, no re-parenting, all
+    -- of which belong to whoever adopts it.
     spans   = r.spans,
     pool    = ledger.snapshot(),
   }
@@ -796,7 +794,7 @@ function subagent.run(ctx, req)
   return out
 end
 
--- ---------------------------------------------------------------- the tool decl
+-- the tool decl
 
 -- The parameter shape src/spec.lua reads. Written out rather than required, because
 -- this module requires turn and nothing else; spec.add_tool checks these fields.

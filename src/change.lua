@@ -1,23 +1,20 @@
 -- change -- what an agent may alter about itself, scored on a test it cannot edit.
 --
--- The harness measures itself well enough to improve itself: `--eval` gives a rate,
--- `observe` gives what happened as Gherkin, `agreement` gives stated against observed,
--- `gaps` give what the vocabulary could not say, and `rules-test.lua` gives eight
--- invariants. That is a fitness function and a constraint set, and both already existed.
+-- The measurements already exist: `--eval` gives a rate, `observe` gives what happened as
+-- Gherkin, `agreement` gives stated against observed, `gaps` give what the vocabulary
+-- could not say, `scripts/rules-test.lua` gives eight invariants.
 --
--- What this file adds is the WALL. Self-improving systems fail quietly, in three ways,
--- and each has one thing that stops it:
+-- What this file adds is the WALL. Self-improving systems fail quietly in three ways, and
+-- each has one thing that stops it:
 --
 --   * making the test easier          -- the authored feature file is text in, never out;
 --   * relaxing what it asks about     -- `ask` is not an editable field, refused by name;
 --   * losing behaviour as the rate rises -- the repertoire diff, and a loss halts the step.
 --
 -- It calls no model and writes no file. Where a proposal comes from is the host's
--- business -- a person, a model, a sweep over a list; this file SCORES proposals and does
--- not invent them, which is what keeps it testable without one.
+-- business; this file SCORES proposals and does not invent them.
 --
--- Contract: spec/change.md. The ruling that bounds it is in that file and was written
--- first, because a wall drawn afterwards is a wall drawn around whatever was built.
+-- Contract: spec/change.md.
 
 local behaviour = require "behaviour"
 local gherkin   = require "gherkin"
@@ -28,14 +25,11 @@ local change = {}
 --- Bumped when the editable set changes.
 change.VOCABULARY = 1
 
--- ------------------------------------------------------------------ what may change
+-- What may change: a FIELD LIST, not a rule of thumb. Anything not here is refused by
+-- name, and each entry is reversible by reading one diff.
 --
--- A FIELD LIST, not a rule of thumb. Anything not here is refused by name, and the list
--- being short is the point: each is a thing a person would also have tried, and each is
--- reversible by reading one diff.
---
--- `ask` is absent on purpose and its absence is the most important line in this file. It
--- is the gate, and an agent that can edit its own gate has no gate.
+-- `ask` is absent on purpose: it is the gate, and an agent that can edit its own gate has
+-- no gate.
 
 local EDITABLE = {
   system = "the briefing",
@@ -65,7 +59,7 @@ local WHY_NOT = {
   servers = "a server is another process, and reaching further is not an optimisation",
 }
 
--- ------------------------------------------------------------------- small helpers
+-- small helpers
 
 local function copy(t, seen)
   if type(t) ~= "table" then return t end
@@ -83,13 +77,12 @@ local function whole(v, low)
   return type(v) == "number" and v == math.floor(v) and v >= low
 end
 
--- ---------------------------------------------------------------------- proposing
+-- proposing
 
 --- One edit, applied to a copy of a declaration.
 ---
 --- `edit` is `{ system = "..." }`, `{ budget = 8 }`, or `{ tool = "shell", about = "..." }`.
---- Never mutates what it is given: a caller holds the old declaration afterwards and can
---- put it back, which is what makes a refusal cheap and a revert exact.
+--- Never mutates what it is given, so a revert is exact.
 ---
 --- Answers the new declaration, or nil and one sentence saying why not.
 function change.propose(decl, edit)
@@ -156,12 +149,9 @@ function change.propose(decl, edit)
   return out
 end
 
--- ---------------------------------------------------------------------- scoring
---
--- A proposal is scored ONLY on authored scenarios -- written by a person, in text this
--- module is given and never answers. An optimiser scored on a test it can edit will edit
--- the test, and the split that answers it is already drawn in this tree: authored is the
--- fitness function, observed is memory.
+-- Scoring, ONLY on authored scenarios -- written by a person, in text this module is given
+-- and never answers. An optimiser scored on a test it can edit will edit the test:
+-- authored is the fitness function, observed is memory.
 
 local function pickles_of(feature)
   if type(feature) ~= "string" then
@@ -179,8 +169,7 @@ end
 --- What a declaration scores, and what it does.
 ---
 --- Answers `{ passed, failed, undefined, broken, repertoire, report }`. The repertoire is
---- the half a pass count cannot carry: what the agent actually did, collapsed into the
---- distinct behaviours it exhibited.
+--- what a pass count cannot carry: what the agent did, collapsed into distinct behaviours.
 function change.score(decl, feature, drivers)
   local pickles, why = pickles_of(feature)
   if not pickles then return nil, why end
@@ -193,15 +182,9 @@ function change.score(decl, feature, drivers)
 
   -- The repertoire is built from the scenarios that PASSED, and only those.
   --
-  -- Found by the first loop that ran: a declaration whose budget was too small stopped
-  -- with `budget`, so "it stops with budget" was in its repertoire; raising the budget
-  -- fixed the scenario and the loss gate refused the fix for losing that behaviour. The
-  -- gate was right about the mechanism and wrong about the set.
-  --
-  -- A behaviour exhibited while FAILING is not something to protect -- stopping it is
-  -- what fixing means. What the gate is for is the behaviour an agent had while it was
-  -- working, which a rising pass count can hide the loss of. So the memory is of what it
-  -- does when it works, and nothing else.
+  -- A behaviour exhibited while FAILING is not something to protect -- stopping it is what
+  -- fixing means. The gate is for behaviour the agent had while it was WORKING, which a
+  -- rising pass count can hide the loss of.
   local seen = {}
   for i = 1, #report.scenarios do
     local record = report.scenarios[i].record
@@ -233,14 +216,12 @@ function change.better(before, after, opts)
 
   -- Gate one: the rules still hold.
   --
-  -- Supplied by the host rather than run here, and that is not a dodge -- it is the same
-  -- seam as the model. `rules-test.lua` is a SCRIPT: running it means loading a file, and
-  -- this module writes no file and reads none, which is what lets it be tested without
-  -- either. So the host that knows where the rules live passes a function.
+  -- Supplied by the host, the same seam as the model: `scripts/rules-test.lua` is a script,
+  -- and this module writes no file and reads none. The host that knows where the rules live
+  -- passes a function.
   --
-  -- What is NOT allowed is skipping it silently. With no `opts.rules` every decision says
-  -- so in its own sentence, because a gate nobody can see was not checked is a gate that
-  -- has already stopped working.
+  -- Skipping it silently is NOT allowed. With no `opts.rules` every decision says so in its
+  -- own sentence.
   local unchecked = ""
   if opts.rules ~= nil then
     if type(opts.rules) ~= "function" then
@@ -286,7 +267,7 @@ function change.better(before, after, opts)
   return false, "nothing changed that this can measure" .. unchecked, diff
 end
 
--- ------------------------------------------------------------------------ the loop
+-- the loop
 
 --- One round: propose, score, keep or refuse -- and say which gate decided.
 ---

@@ -1,29 +1,11 @@
--- schedule -- the beat. What lets an agent be started by time rather than by a person.
+-- schedule -- the beat: what is due, and never what time it is (rule 2).
 --
--- Before this seam a run began in exactly two ways: someone typed, or another agent
--- delegated. A machine has a beat and an agent did not, so "every evening, summarise
--- what changed" was a sentence the harness could not hold at all.
+-- The ledger is a port owing get(key) -> value|nil (nil means never, not failure) and
+-- put(key, value) -> true|nil, err. Only this module reads what it writes there.
 --
--- Two things were missing and both are here.
---
---   THE DECLARATION. `agent.every "digest" { day_at = "18:00", runs = "...", once_per
---   = "day" }` states the beat next to the tools, in the same file, under rule 2: this
---   module decides what is due and never decides what time it is.
---
---   THE LEDGER. Without a durable record, "never twice for the same day" is not
---   expressible -- `session` is per conversation and dies with it, and an in-process
---   table forgets across a restart, which is exactly when a beat double-fires. The
---   ledger is therefore a PORT, owing
---
---       get(key) -> value | nil          (nil means never; it does not mean failure)
---       put(key, value) -> true | nil, err
---
---   with `value` a table this module writes and only this module reads.
---
--- The calendar is arithmetic here rather than `os.date`, for two reasons that are the
--- same reason: a test must be able to stand at any instant of any year without setting
--- the machine's clock, and a run must mean the same thing on two machines in different
--- zones. A beat carries `tz`, the local offset in whole seconds; with none it is UTC.
+-- The calendar is arithmetic, not os.date: a test must stand at any instant without
+-- setting the machine clock, and a run must mean the same in two zones. A beat carries
+-- `tz`, the local offset in whole seconds; with none it is UTC.
 
 local turn = require "turn"
 
@@ -35,10 +17,9 @@ local function fail(fmt, ...)
   error("agent: " .. string.format(fmt, ...), 3)
 end
 
--- Civil date from a count of days since 1970-01-01, by the shift-to-March algorithm:
--- moving the year's start to March puts the leap day last, so the month lengths
--- become a straight line and no table of 12 numbers is needed. Correct for any day
--- the era arithmetic can hold, which is far outside any clock this will ever read.
+-- Civil date from days since 1970-01-01, by the shift-to-March algorithm: starting the
+-- year in March puts the leap day last, so month lengths become a straight line and no
+-- table of 12 is needed.
 function schedule.civil(days)
   local z = days + 719468
   local era = math.floor(z / 146097)
@@ -103,12 +84,10 @@ end
 --
 --   last = { at = <when it last fired>, grain = <the key it fired under> } or nil
 --
--- Three answers, never two: `true`; `false` and the sentence saying why it is HELD; or
--- `false, sentence, "skip"` for a beat so far past its time that its own `grace` says
--- the work has expired. The sentence exists because a beat that silently does not fire
--- is the hardest kind of schedule to debug, and the caller should not have to invent
--- the reason. The third answer exists because an app that was shut through six o'clock
--- is the ordinary case, not the exceptional one (spec/schedule.md).
+-- Three answers, never two: `true`; `false` plus the sentence saying why it is HELD; or
+-- `false, sentence, "skip"` for a beat so far past its time that its own `grace` says the
+-- work has expired -- an app shut through six o'clock being the ordinary case. The sentence
+-- is there so the caller never has to invent the reason (spec/schedule.md).
 function schedule.is_due(beat, now, last)
   local grain = schedule.grain_key(beat, now)
   if grain and last and last.grain == grain then
@@ -188,10 +167,10 @@ end
 
 -- Run one tick: everything due, in order, each recorded before the next begins.
 --
--- The ledger is written BEFORE the run, not after. A run that crashes and a run that
--- never happened are indistinguishable to a beat, and the failure that costs a person
--- something is the one where a nightly digest goes out twelve times because each
--- attempt died before it could say it had started. A host that would rather retry
+-- The ledger is written BEFORE the run, not after: a run that crashed and a run that never
+-- happened are indistinguishable to a beat, and the costly failure is a nightly digest
+-- going out twelve times because each attempt died before saying it had started. A host
+-- that would rather retry
 -- passes `record = "after"` and states that it prefers the other risk.
 --
 -- `runs` as a string is a prompt and starts a run. `runs` as a function is called with

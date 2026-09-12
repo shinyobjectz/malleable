@@ -1,28 +1,22 @@
 -- skills -- a procedure the WORKSPACE holds, and the agent may read but not rewrite.
 --
--- The tree already had two things that look like this and are not it. `agent.plan` is
--- this run's list and the agent authored it; it dies with the run. A tool is a body in
--- this process. A skill is neither: a person wrote it, it outlives every run, and every
--- agent that loads it reads the same words.
+-- Distinct from `agent.plan` (this run's list, authored by the agent, dies with the run)
+-- and from a tool (a body in this process): a person wrote a skill, it outlives every run.
 --
 -- Two rules shape the surface:
 --
---   1. PROGRESSIVE DISCLOSURE. The briefing carries a name and one sentence per skill.
---      The body arrives only when the model asks for it. Twelve procedures pasted into
---      a system prompt is twelve procedures the model half-remembers, and the failure
---      is silent: it follows the shape of one and the details of another.
+--   1. PROGRESSIVE DISCLOSURE. The briefing carries a name and one sentence per skill;
+--      the body arrives only when the model asks for it.
 --   2. THE WORLD SUPPLIES THE BODIES. A skill declared in Lua carries its own text; a
 --      skill the workspace holds arrives through the `skills` port, which owes
 --
 --          list() -> { { name = ..., about = ... }, ... } | nil, err
 --          read(name) -> text | nil, err
 --
---      A host that keeps skills as files wires the port to the filesystem; a test wires
---      it to a table. Neither is this module's business, and that is rule 1.
+--      A host wires the port to the filesystem; a test wires it to a table (rule 1).
 --
--- A declared skill and a port skill with one name is not a merge and not a shadow: it
--- is reported, because two procedures under one name means the person who wrote the
--- second one thought nobody had taken it.
+-- A declared skill and a port skill sharing a name is neither merged nor shadowed: it is
+-- reported.
 
 local spec = require "spec"
 
@@ -143,9 +137,8 @@ end
 -- a skill tool and any other tool are the same kind of thing by the time the model
 -- reads the schema.
 --
--- The tool answers with the body verbatim. It does not paraphrase it, does not act on
--- it and does not remember it: the next step is the model's, holding the words a person
--- wrote, which is the whole point of the seam.
+-- The tool answers with the body verbatim: it does not paraphrase, act on or remember it.
+-- The next step is the model's, holding the words a person wrote.
 function skills.install(surface, opts)
   opts = opts or {}
   if type(surface) ~= "table" or type(surface.tool) ~= "function" or type(surface.spec) ~= "function" then
@@ -183,11 +176,9 @@ end
 
 -- Install the tool if the agent has skills to read and nothing to read them with.
 --
--- Called at RUN time, next to `mcp.connect`, and for the same reason: a declaration
--- that states a skill and never installs the tool has an agent that is briefed on
--- procedures it cannot open, which reads to the model as a broken promise and to the
--- author as nothing at all. A declaration that installed the tool itself -- under any
--- name -- is left alone.
+-- Called at RUN time, next to `mcp.connect`: a declaration that states a skill and never
+-- installs the tool briefs the model on procedures it cannot open. A declaration that
+-- installed the tool itself, under any name, is left alone.
 --
 -- Returns the tool it added, or nil when there was nothing to do.
 function skills.ensure(surface, p, opts)

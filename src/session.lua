@@ -1,22 +1,17 @@
 -- session -- the conversation as data.
 --
--- An append-only list of messages, held as plain tables and nothing else: the standing
--- instruction, what the person asked, what the model said, every tool call and every
--- result that came back. It serialises to JSON and back byte for byte, so a run can be
--- saved, listed and resumed in a later process without the transcript changing under it.
--- There is no JSON library to lean on, so the encoder and the decoder live here and
--- their correctness is part of this module's contract.
+-- An append-only list of messages as plain tables: the standing instruction, what the
+-- person asked, what the model said, every tool call and result. It serialises to JSON and
+-- back byte for byte, so a run can be saved and resumed in a later process. There is no
+-- JSON library to lean on, so the encoder and decoder live here and are part of the
+-- contract.
 --
--- Two lines the whole module holds:
+--   * a wrong argument type RAISES
+--   * bad data RETURNS nil, reason -- a transcript that will not decode, a store that will
+--     not answer, a tool result that cannot be encoded
 --
---   * a wrong argument type RAISES -- a number where a string belongs is a fault in the
---     calling code and should stop at the line that made it
---   * bad data RETURNS nil, reason -- a transcript that will not decode, a store that
---     will not answer, a tool result that cannot be encoded
---
--- Nothing here ever returns false for failure, keeps global state, reads the agent
--- table, calls a tool body, removes a message, or reaches the world except through the
--- port table it is handed.
+-- Nothing here returns false for failure, keeps global state, reads the agent table, calls
+-- a tool body, removes a message, or reaches the world except through the port table.
 
 local session = {}
 
@@ -39,13 +34,11 @@ session.max_depth = 200
 -- without a sentinel {"a":null} would decode to {} and the key would vanish.
 session.null = setmetatable({}, { __tostring = function () return "null" end })
 
--- --------------------------------------------------------------- raising
+-- raising
 
--- `level` is counted the way error() counts it from inside `raise`: 1 is this line,
--- 2 the want_ helper, 3 the public function, 4 the line that called it. A public
--- function raising through a helper therefore passes 4, and one raising directly
--- passes 3; either way the blame lands on the caller, which is the whole point of
--- raising a wrong argument type rather than returning a reason for it.
+-- `level` counts the way error() does from inside `raise`: 1 this line, 2 the want_
+-- helper, 3 the public function, 4 its caller. Raising through a helper passes 4, raising
+-- directly passes 3; either way the blame lands on the caller.
 local function raise(level, what, ...)
   error(fmt(what, ...), level)
 end
@@ -81,7 +74,7 @@ local function want_port(where, port, group, fn, level)
   end
 end
 
--- --------------------------------------------------------------- copying
+-- copying
 
 -- A private copy, cycles and sharing kept, done with an explicit stack so a hostile
 -- depth cannot overflow anything. The null sentinel is passed through by identity: a
@@ -115,7 +108,7 @@ local function deep_copy(v)
   return root
 end
 
--- --------------------------------------------------------------- the shapes
+-- the shapes
 
 local SPEAKERS = { system = true, user = true, model = true, call = true, result = true }
 
@@ -234,7 +227,7 @@ local function links_of(s)
   return links
 end
 
--- --------------------------------------------------------------- building
+-- building
 
 function session.new(t)
   local s = { id = nil, agent = nil, model = nil, started = nil, messages = {} }
@@ -336,7 +329,7 @@ function session.result(s, call_id, body, opts, at)
   })
 end
 
--- --------------------------------------------------------------- reading
+-- reading
 
 function session.count(s)
   want_session("session.count", s, 4)
@@ -398,7 +391,7 @@ function session.header(s)
   return { id = s.id, agent = s.agent, model = s.model, started = s.started, count = #s.messages }
 end
 
--- --------------------------------------------------------------- encoding
+-- encoding
 
 local ESCAPE = {
   ['"'] = '\\"', ['\\'] = '\\\\', ['\b'] = '\\b', ['\t'] = '\\t',
@@ -566,7 +559,7 @@ function session.encode(v)
   return encode_at(v, 1)
 end
 
--- --------------------------------------------------------------- decoding
+-- decoding
 
 local SIMPLE = {
   ['"'] = '"', ['\\'] = '\\', ['/'] = '/',
@@ -853,7 +846,7 @@ function session.decode(text)
   return result
 end
 
--- --------------------------------------------------------------- the record
+-- the record
 
 local FORMAT = 1
 
@@ -986,7 +979,7 @@ local function read_record(text, id)
   return s
 end
 
--- --------------------------------------------------------------- the store
+-- the store
 
 -- The millisecond count as a decimal string, with -2, -3 and so on until one is free.
 local function mint(port)

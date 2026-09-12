@@ -11,9 +11,8 @@
 --     { ok = true,  ... }                       -- the fields each tool documents
 --     { ok = false, code = "<slug>", reason = "<one sentence>" }
 --
--- A refusal is a result the model reads, never a raised error. The one place this
--- module raises is `install`, where a wrong option is a bug in the host's own file and
--- must stop the process rather than become a sentence a model tries to work around.
+-- A refusal is a result the model reads, never a raised error. The one place this module
+-- raises is `install`, where a wrong option is a bug in the host's own file.
 
 local tools_fs = {}
 
@@ -22,7 +21,7 @@ local SNIFF         = 8000   -- how far in we look for a zero byte before callin
 local HINT          = 120    -- how much of a near-miss line the refusal quotes
 local ITEMS         = 10     -- how many line numbers an ambiguous edit names
 
--- ------------------------------------------------------------------ small helpers
+-- small helpers
 
 local function is_whole(v)
   return type(v) == "number"
@@ -82,7 +81,7 @@ local function line_starts(text)
   return starts, n
 end
 
--- ------------------------------------------------------------------ the pure four
+-- the pure four
 
 -- Lexical, and only lexical: it never calls the port and never touches a disk, so a
 -- path that leaves the workspace is refused before the host is asked anything at all.
@@ -208,12 +207,11 @@ end
 -- One path segment against one pattern segment. `*` and `?` stop at the separator
 -- because the segment they are matching never holds one.
 --
--- One backtrack point, moved forward a byte at a time, rather than a recursive branch
--- at every `*`: a name of n bytes against a pattern of m items costs n times m at
--- worst. The recursive form cost two to the power of the stars, so a pattern such as
--- `a*a*a*a*a*a*a*a*b` against a forty-character filename took twelve seconds — inside
--- the matcher, where neither `max_scan` nor `deadline_ms` can see it, so rule 5 (the
--- loop always ends) did not hold for a pattern a model can simply ask for.
+-- One backtrack point, moved forward a byte at a time, rather than a recursive branch at
+-- every `*`: n bytes against m pattern items costs n times m at worst. The recursive form
+-- is exponential in the number of stars, and it runs inside the matcher where neither
+-- `max_scan` nor `deadline_ms` can see it -- so rule 5 would not hold for a pattern a
+-- model can simply ask for.
 local function seg_match(pat, str)
   local items = compile_seg(pat)
   local pi, si = 1, 1
@@ -319,7 +317,7 @@ function tools_fs.line_of(text, offset)
   return line, offset - start + 1
 end
 
--- ------------------------------------------------------------------ results
+-- results
 
 local function ok_result(t)
   t.ok = true
@@ -365,7 +363,7 @@ local function from_port(call, err, rel)
   return fail("port_failed", call .. " failed: " .. message, { path = rel })
 end
 
--- ------------------------------------------------------------------ the port slice
+-- the port slice
 
 -- The filesystem the tools use: the one on the context if the harness handed one over,
 -- otherwise the one named at install. A port call that raises instead of returning is
@@ -430,9 +428,22 @@ local function fs_exists(fs, rel)
   return got and true or false
 end
 
--- ------------------------------------------------------------------ deny and gate
+-- deny and gate
+
+-- Refused whatever a declaration says: the history lives here (docs/spec/history.md), and
+-- an agent reads it only through the history, recall and evidence tools.
+tools_fs.WALL = { ".malleable", ".malleable/**" }
+
+local function walled(rel)
+  for i = 1, #tools_fs.WALL do
+    if tools_fs.glob_match(tools_fs.WALL[i], rel) == true then return tools_fs.WALL[i] end
+  end
+  return nil
+end
 
 local function deny_hit(deny, rel)
+  local wall = walled(rel)
+  if wall then return wall end
   for i = 1, #deny do
     if tools_fs.glob_match(deny[i], rel) == true then return deny[i] end
   end
@@ -450,6 +461,10 @@ local function gate(cfg, path, field)
     return nil, fail(code, reason, extra)
   end
   if rel ~= "" then
+    if walled(rel) then
+      return nil, fail("denied", rel .. " is where runs are kept, and no files tool reaches it; "
+        .. "the history, recall and evidence tools read it.", { pattern = walled(rel), path = rel })
+    end
     local hit = deny_hit(cfg.deny, rel)
     if hit then
       return nil, fail("denied", "this workspace keeps " .. rel .. " out of reach, by the rule " .. hit .. ".", { pattern = hit, path = rel })
@@ -458,7 +473,7 @@ local function gate(cfg, path, field)
   return rel
 end
 
--- ------------------------------------------------------------------ the walk
+-- the walk
 
 local function now_ms(clock)
   if type(clock) ~= "table" then return nil end
@@ -573,7 +588,7 @@ local function walk_close(st, body)
   return body
 end
 
--- ------------------------------------------------------------------ argument checks
+-- argument checks
 
 local function want_string(args, field)
   local v = args[field]
@@ -597,7 +612,7 @@ local function args_of(ctx)
   return {}
 end
 
--- ------------------------------------------------------------------ read
+-- read
 
 local function slice_lines(text, offset, limit)
   local starts, total = line_starts(text)
@@ -664,7 +679,7 @@ local function do_read(cfg, ctx)
   }
 end
 
--- ------------------------------------------------------------------ write
+-- write
 
 -- What the parent directory says about a name: whether it is there, and how big.
 -- `nil` for "no idea": a run with no filesystem port has to reach the write below and
@@ -719,7 +734,7 @@ local function do_write(cfg, ctx)
   }
 end
 
--- ------------------------------------------------------------------ edit
+-- edit
 
 local function squeeze(s)
   s = (string.gsub(s, "%s+", " "))
@@ -853,15 +868,14 @@ local function do_edit(cfg, ctx)
   return ok_result { path = rel, replaced = n, bytes = #built, line = line }
 end
 
--- ------------------------------------------------------------------ list
+-- list
 
 -- Is this a directory the walk can start from? A flat port answers `not_found` for a
 -- file listed as a directory, so `exists` tells the two apart.
 local function start_dir(fs, rel)
-  -- The port is checked before the root is waved through: a walk that starts at the
-  -- workspace root with no filesystem to walk used to raise on the first list, and a
-  -- port that answers nothing used to come back as an empty workspace, which is a
-  -- wrong answer rather than a refused one.
+  -- The port is checked before the root is waved through: without it, a walk from the
+  -- workspace root answers an empty workspace, which is a wrong answer and not a refused
+  -- one.
   if type(fs) ~= "table" or type(fs.list) ~= "function" then
     return nil, fail("port_failed", "this run has no filesystem port, so fs.list cannot be called.")
   end
@@ -929,7 +943,7 @@ local function do_list(cfg, ctx)
   return walk_close(st, body)
 end
 
--- ------------------------------------------------------------------ glob
+-- glob
 
 local function do_glob(cfg, ctx)
   local args = args_of(ctx)
@@ -970,7 +984,7 @@ local function do_glob(cfg, ctx)
   return walk_close(st, { pattern = pattern, paths = paths, count = #paths, truncated = truncated })
 end
 
--- ------------------------------------------------------------------ search
+-- search
 
 local function trim_eol(line)
   if string.sub(line, -1) == "\r" then return string.sub(line, 1, #line - 1) end
@@ -1090,19 +1104,15 @@ local function do_search(cfg, ctx)
   })
 end
 
--- ------------------------------------------------------------------ render
+-- render
 
 -- A result as the model reads it.
 --
--- The bodies above answer with a table, which is what spec/tools_fs.md asks for and
--- what a host that wants the structure needs. A transcript holds text, so something
--- has to turn one into the other, and it cannot be `turn`: rule 1 says the core knows
--- no vendor, and `entries`, `hits` and `from_line` are this subsystem's words. So it
--- is here, beside the tools that use those words, exactly as tools_shell renders its
--- own result. Pure: no port, no clock, no state, same text for the same table.
+-- The bodies answer with a table; a transcript holds text. The conversion lives here
+-- rather than in `turn` because `entries`, `hits` and `from_line` are this subsystem's
+-- words (rule 1). Pure: no port, no clock, no state, same text for the same table.
 --
--- A `nil` result renders as one sentence rather than raising, because a body that
--- answered with nothing is a defect the model can still read.
+-- A `nil` result renders as one sentence rather than raising.
 function tools_fs.render(result)
   if result == nil then
     return "the tool answered with nothing at all."
@@ -1208,7 +1218,7 @@ function tools_fs.render(result)
   return table.concat(out, "\n")
 end
 
--- ------------------------------------------------------------------ install
+-- install
 
 local function bad_opt(what, ...)
   error("tools_fs.install: " .. string.format(what, ...), 3)
@@ -1367,6 +1377,7 @@ function tools_fs.install(agent, opts)
   end
 
   declare(agent, names.read, {
+    effect = "reads",
     about = "Read a file from the workspace. Returns its bytes exactly as they are; use offset and limit to read part of a long file.",
     ask = ask.read,
     args = {
@@ -1378,6 +1389,7 @@ function tools_fs.install(agent, opts)
   })
 
   declare(agent, names.write, {
+    effect = "writes",
     about = "Write a whole file, creating it or replacing what is there. To change part of a file, use the edit tool instead." .. read_note,
     ask = ask.write,
     args = {
@@ -1388,6 +1400,7 @@ function tools_fs.install(agent, opts)
   })
 
   declare(agent, names.edit, {
+    effect = "writes",
     about = "Replace an exact piece of text in a file. The old text must appear exactly once, or the edit is refused rather than guessed at." .. read_note,
     ask = ask.edit,
     args = {
@@ -1400,6 +1413,7 @@ function tools_fs.install(agent, opts)
   })
 
   declare(agent, names.list, {
+    effect = "reads",
     about = "List what is in a directory. Directories are marked, and a link is listed but never followed.",
     ask = ask.list,
     args = {
@@ -1410,6 +1424,7 @@ function tools_fs.install(agent, opts)
   })
 
   declare(agent, names.glob, {
+    effect = "reads",
     about = "Find files whose path matches a pattern, such as src/**/*.lua. Takes * and ** and ? and [a-z]; brace alternation is refused rather than matched as text.",
     ask = ask.glob,
     args = {
@@ -1420,6 +1435,7 @@ function tools_fs.install(agent, opts)
   })
 
   declare(agent, names.search, {
+    effect = "reads",
     about = "Search file contents and return the matching lines. The pattern is a Lua pattern, so %d is a digit and %s is a space; set fixed to true for plain text.",
     ask = ask.search,
     args = {

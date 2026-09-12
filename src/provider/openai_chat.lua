@@ -126,6 +126,14 @@ end
 local function argument_schema(a)
   local s = { type = a.kind or "string" }
   if s.type == "array" then s.items = { type = "string" } end
+  -- An object argument is any object: a host that decodes under the schema would
+  -- otherwise close it and send `{}` (seen on 2026-09-11 with the show tool).
+  if s.type == "object" then s.additionalProperties = true end
+  -- A one_of is told as the list it is: the model cannot guess a value it was shown.
+  if type(a.choices) == "table" and #a.choices > 0 then
+    s.enum = {}
+    for i = 1, #a.choices do s.enum[i] = a.choices[i] end
+  end
   if nonempty(a.description) then s.description = a.description end
   return s
 end
@@ -169,6 +177,10 @@ function chat.body(request, model_name, sc, ctx)
   if type(request.tools) == "table" and #request.tools > 0 then
     body.tools = wire_tools(request.tools)
   end
+
+  -- OpenAI's field, and OpenRouter reads it too (measured on Mercury 2.5, 2026-09-10: "low"
+  -- sends back about 300 tokens where the default sends back 2,400).
+  if type(request.reasoning) == "string" then body.reasoning_effort = request.reasoning end
 
   -- Extra body fields, checked at build time for the three they may not overwrite, so
   -- this loop can be a plain merge.

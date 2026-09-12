@@ -1,20 +1,14 @@
 -- observe -- a run, read back out as behaviour.
 --
--- THE DIRECTION IS THE DESIGN, and it is the only thing to remember about this file:
--- Gherkin is not a format for logs. A trace and a transcript are what this module READS;
--- they are never what it SAYS. Every line it emits is an expression a person writes --
--- the same string, from the same closed vocabulary -- so that what an agent did and what
--- it was asked to do are the same kind of object and can be set against each other.
+-- THE DIRECTION IS THE DESIGN: a trace and a transcript are what this module READS, never
+-- what it SAYS. Every line it emits is an expression a person writes, from the same closed
+-- vocabulary, so what an agent did and what it was asked to do can be set against each other.
 --
--- `span`, `trace` and `log` are the harness's nouns. A person watching an agent does not
--- think "the gate span closed refused"; they think "it asked before it filed, and was
--- told no". An observed scenario written in the harness's nouns describes the harness,
--- and describing the AGENT is this module's whole job.
+-- It emits no harness noun. `span`, `trace` and `log` describe the harness; describing the
+-- AGENT is this module's job.
 --
--- What it has no word for is a GAP IN THE VOCABULARY, recorded and handed back. It is
--- never repaired by reaching for a telemetry noun: the moment that is allowed, the
--- observer emits it for everything it has no word for and the vocabulary stops growing on
--- the day it starts. (mar-4o07, one layer up.)
+-- What it has no word for is a GAP IN THE VOCABULARY, recorded and handed back -- never
+-- repaired by reaching for a telemetry noun, which would stop the vocabulary growing.
 --
 -- Contract: spec/observe.md. Amend that before this diverges from it.
 
@@ -26,7 +20,7 @@ local command = require "command"
 
 local observe = {}
 
--- ---------------------------------------------------------------------- small helpers
+-- small helpers
 
 -- A quoted string the way a feature file holds one, and NOT Lua's `%q`: that escapes a
 -- newline as a backslash followed by a real newline, which splits the step in half and
@@ -80,6 +74,8 @@ end
 -- Seconds since the epoch, written the way `the clock reads {string}` reads one. By
 -- arithmetic: this tree touches no `os`, and a local zone would make a scenario mean
 -- different things on different machines.
+observe.encode = encode
+
 local function iso(at)
   local days = math.floor(at / 86400)
   local rest = at - days * 86400
@@ -97,10 +93,8 @@ local function iso(at)
     math.floor(rest / 3600), math.floor(rest % 3600 / 60), math.floor(rest % 60))
 end
 
--- ------------------------------------------------------------------------ the emitter
---
--- Every string this table can produce is an expression `behaviour.steps()` holds, and a
--- test asserts exactly that. Nothing else in this file writes a step.
+-- The emitter. Every string this table can produce is an expression `behaviour.steps()`
+-- holds, and a test asserts it. Nothing else in this file writes a step.
 
 local function lines_of(text)
   local out = {}
@@ -116,8 +110,34 @@ local function steps()
   return setmetatable({ said = {}, gaps = {} }, Steps)
 end
 
-function Steps:say(text, doc)
-  self.said[#self.said + 1] = { text = text, doc = doc }
+function Steps:say(text, doc, rows)
+  self.said[#self.said + 1] = { text = text, doc = doc, rows = rows }
+end
+
+-- A store's rows as a data table: the header, then one list of cells a row. The columns
+-- come from the declaration when the record has it, in the order the store lists them;
+-- without it, every column any row has, by name. `rows` is sorted by the store already.
+local function store_table(decl, rows)
+  local cols = {}
+  if type(decl) == "table" and type(decl.column_order) == "table" then
+    local seen = {}
+    for _, k in ipairs(decl.sort or {}) do cols[#cols + 1] = k; seen[k] = true end
+    for _, k in ipairs(decl.column_order) do if not seen[k] then cols[#cols + 1] = k end end
+  else
+    local seen = {}
+    for i = 1, #rows do for k in pairs(rows[i]) do seen[k] = true end end
+    cols = sorted_keys(seen)
+  end
+  local out = { cols }
+  for i = 1, #rows do
+    local cells = {}
+    for j = 1, #cols do
+      local v = rows[i][cols[j]]
+      cells[j] = v == nil and "" or tostring(v)
+    end
+    out[#out + 1] = cells
+  end
+  return out
 end
 
 -- What was seen, and the shape of the sentence that would have said it. Recorded rather
@@ -126,14 +146,19 @@ function Steps:gap(saw, wanted)
   self.gaps[#self.gaps + 1] = { saw = saw, wanted = wanted }
 end
 
--- ------------------------------------------------------------------- the given half
+-- the given half
 
-local function say_world(s, cfg)
+local function say_world(s, cfg, stores, keep)
   cfg = cfg or {}
 
   local paths = sorted_keys(cfg.fs or {})
   for i = 1, #paths do
-    s:say(string.format("the file %s contains:", q(paths[i])), cfg.fs[paths[i]])
+    local ref = keep and keep(cfg.fs[paths[i]])
+    if ref then
+      s:say(string.format("the file %s contains the text kept as %s", q(paths[i]), ref))
+    else
+      s:say(string.format("the file %s contains:", q(paths[i])), cfg.fs[paths[i]])
+    end
   end
 
   local commands = sorted_keys(cfg.sh or {})
@@ -147,8 +172,25 @@ local function say_world(s, cfg)
   if type(cfg.ask) == "table" then
     local tools = sorted_keys(cfg.ask)
     for i = 1, #tools do
-      s:say(string.format("the human %s %s",
-                          cfg.ask[tools[i]] and "approves" or "refuses", tools[i]))
+      local a = cfg.ask[tools[i]]
+      if type(a) == "table" and a.allow ~= false and type(a.args) == "table" then
+        -- The person changed what the model proposed, and this is what they chose.
+        s:say(string.format("the human approves %s with %s", tools[i], encode(a.args)))
+      else
+        local yes = a and not (type(a) == "table" and a.allow == false)
+        s:say(string.format("the human %s %s", yes and "approves" or "refuses", tools[i]))
+      end
+    end
+  end
+
+  if type(cfg.store) == "table" then
+    local names = sorted_keys(cfg.store)
+    for i = 1, #names do
+      local rows = cfg.store[names[i]]
+      if type(rows) == "table" and #rows > 0 then
+        s:say(string.format("the store %s contains:", names[i]), nil,
+              store_table(stores and stores[names[i]], rows))
+      end
     end
   end
 
@@ -167,13 +209,11 @@ local function say_world(s, cfg)
   if cfg.mcp then s:gap("the world held a server", "a Given line for a declared server's tools") end
 end
 
--- The model's replies, in the order it made them, reconstructed from what the run
--- recorded. They are part of the WORLD -- an input, not a behaviour -- which is why they
--- are Given lines and why an eval drops them.
+-- The model's replies in order, reconstructed from what the run recorded. They are part of
+-- the WORLD -- an input, not a behaviour -- so they are Given lines and an eval drops them.
 --
--- The consequence worth having: an eval sample's observed scenario is a deterministic
--- replay of what a real model actually did. Take the one sample in twenty that went
--- wrong, and you have it forever, without the model.
+-- The consequence: an eval sample's observed scenario is a deterministic replay of what a
+-- real model did, so the one sample in twenty that went wrong is keepable without the model.
 local function say_script(s, result)
   local by_step = {}
   for i = 1, #(result.calls or {}) do
@@ -186,26 +226,25 @@ local function say_script(s, result)
       s:say(string.format("the model calls %s with %s", c.tool, encode(c.args or {})))
     end
   end
-  if type(result.answer) == "string" and result.answer ~= "" then
+  -- An empty answer is still a reply the model gave: a run that stopped on one needs it in
+  -- the script, or the scenario runs out a step early when it runs again.
+  if type(result.answer) == "string" and (result.answer ~= "" or result.stop == "answered") then
     s:say(string.format("the model answers %s", q(result.answer)))
   end
 end
 
--- --------------------------------------------------------------------- the then half
+-- the then half
 
 -- What a call to a shell AMOUNTED TO, in the vocabulary, beside the call itself.
 --
--- Both lines, not one instead of the other. `it calls shell with {"command":"rm -rf x"}`
--- pins the fact and is what makes the scenario replayable; `it runs a command that
--- deletes` pins the meaning and is the only half somebody writing a feature file up front
--- could have written. A command the vocabulary cannot name is a GAP -- counted, filed
--- against the vocabulary, and never rendered as a quoted string somebody would then have
--- to read (mar-ykcc, spec/command.md).
--- Answers true when it took the line over, so the caller writes the behaviour instead of
--- the arguments. A command line is the one tool argument that must not appear in a Then:
--- it is the thing rule 8 keeps out of a span, and a feature file is read by more people
--- than a trace is. It is still in the GIVEN half, where it belongs -- that half is the
--- world the scenario replays, and the run is not reproducible without it.
+-- Both lines, not one instead of the other: `it calls shell with {"command":"rm -rf x"}`
+-- pins the fact and makes the scenario replayable, `it runs a command that deletes` pins
+-- the meaning. A command the vocabulary cannot name is a GAP, counted against the
+-- vocabulary and never rendered as a quoted string (spec/command.md).
+--
+-- Answers true when it took the line over. A command line is the one tool argument that
+-- must not appear in a Then (rule 8); it stays in the GIVEN half, which is the world the
+-- scenario replays.
 local function say_acts(s, call)
   local said = type(call.args) == "table" and call.args.command or nil
   if type(said) ~= "string" or said == "" then return false end
@@ -222,13 +261,15 @@ local function say_acts(s, call)
   return true
 end
 
-local function say_behaviour(s, result, world)
-  s:say(string.format("it stops with %s", tostring(result.stop)))
-  s:say(string.format("it takes %d step%s", result.steps or 0,
-                      (result.steps == 1) and "" or "s"))
+local ORDINAL = { "first", "second", "third", "fourth", "fifth" }
 
-  for i = 1, #(result.calls or {}) do
-    local c = result.calls[i]
+-- One line a call, as say_behaviour writes them: the ones a run still going has made so
+-- far are the same lines, so a live observation and a finished one agree.
+local function say_calls(s, calls)
+  local nth = {}
+  for i = 1, #(calls or {}) do
+    local c = calls[i]
+    nth[c.tool] = (nth[c.tool] or 0) + 1
     if c.asked then
       s:say(string.format("the human is asked about %s", c.tool))
     end
@@ -239,7 +280,12 @@ local function say_behaviour(s, result, world)
       if not say_acts(s, c) then
         s:say(string.format("it calls %s with %s", c.tool, encode(c.args or {})))
       end
-      s:say(string.format("the call to %s fails", c.tool))
+      if type(c.unmet) == "string" and ORDINAL[nth[c.tool]] then
+        -- A requirement it did not meet is the reason, in the tool's own words.
+        s:say(string.format("the %s call to %s fails because %s", ORDINAL[nth[c.tool]], c.tool, q(c.unmet)))
+      else
+        s:say(string.format("the call to %s fails", c.tool))
+      end
     else
       -- Every call is a line. A scenario with nine calls has nine lines: summarising
       -- them into a count would lose the arguments, which are half of what happened.
@@ -248,6 +294,13 @@ local function say_behaviour(s, result, world)
       end
     end
   end
+end
+
+local function say_behaviour(s, result, world, stores, keep)
+  s:say(string.format("it stops with %s", tostring(result.stop)))
+  s:say(string.format("it takes %d step%s", result.steps or 0,
+                      (result.steps == 1) and "" or "s"))
+  say_calls(s, result.calls)
 
   for i = 1, #(result.notes or {}) do
     s:say(string.format("it notes %s", q(result.notes[i])))
@@ -270,10 +323,36 @@ local function say_behaviour(s, result, world)
     end
     table.sort(order)
     for i = 1, #order do
-      s:say(string.format("the file %s holds:", q(order[i])), fs.files[order[i]])
+      local ref = keep and keep(fs.files[order[i]])
+      if ref then
+        s:say(string.format("the file %s holds the text kept as %s", q(order[i]), ref))
+      else
+        s:say(string.format("the file %s holds:", q(order[i])), fs.files[order[i]])
+      end
     end
     for i = 1, #((fs and fs.removed) or {}) do
       s:gap("a file was removed", "a Then line for a file the run deleted")
+    end
+  end
+
+  -- Every store the run changed, as it stands after: the whole table, because a store is
+  -- small and a row that moved is as much a behaviour as a row that was added.
+  local held = world and world.store
+  if type(held) == "table" and type(held.changes) == "table" and type(held.tables) == "table" then
+    local changed = {}
+    for i = 1, #held.changes do
+      local name = held.changes[i].store
+      if type(name) == "string" then changed[name] = true end
+    end
+    local names = sorted_keys(changed)
+    for i = 1, #names do
+      local rows = held.tables[names[i]] or {}
+      if #rows == 0 then
+        s:say(string.format("the store %s has 0 rows", names[i]))
+      else
+        s:say(string.format("the store %s holds:", names[i]), nil,
+              store_table(stores and stores[names[i]], rows))
+      end
     end
   end
 
@@ -282,7 +361,7 @@ local function say_behaviour(s, result, world)
   end
 end
 
--- --------------------------------------------------------------------------- writing
+-- writing
 
 local function doc_block(text, indent)
   local fence = tostring(text):find('"""', 1, true) and "```" or '"""'
@@ -293,15 +372,38 @@ local function doc_block(text, indent)
   return table.concat(out, "\n")
 end
 
---- One run, as the text of a scenario.
-function observe.scenario(record, name)
+-- A data table, its columns padded to line up. A bar, a backslash or a newline in a cell
+-- is escaped the way the reader reads it back.
+local function table_block(rows, indent)
+  local escaped, width = {}, {}
+  for r = 1, #rows do
+    escaped[r] = {}
+    for c = 1, #rows[r] do
+      local cell = tostring(rows[r][c]):gsub("\\", "\\\\"):gsub("|", "\\|"):gsub("\n", "\\n")
+      escaped[r][c] = cell
+      width[c] = math.max(width[c] or 0, #cell)
+    end
+  end
+  local out = {}
+  for r = 1, #escaped do
+    local cells = {}
+    for c = 1, #escaped[r] do cells[c] = escaped[r][c] .. string.rep(" ", width[c] - #escaped[r][c]) end
+    out[#out + 1] = indent .. "| " .. table.concat(cells, " | ") .. " |"
+  end
+  return table.concat(out, "\n")
+end
+
+--- One run, as the text of a scenario. `opts.keep(text)`, if given, answers the name of a
+--- text a history keeps apart, or nil to write the text into the scenario (spec/history.md).
+function observe.scenario(record, name, opts)
+  local keep = opts and opts.keep
   if type(record) ~= "table" or (type(record.result) ~= "table" and record.checked == nil) then
     error("observe.scenario: a record carries a result or a check", 2)
   end
   local result, world, cfg = record.result, record.world, record.cfg
 
   local given, when, then_ = steps(), steps(), steps()
-  say_world(given, cfg)
+  say_world(given, cfg, record.stores, keep)
 
   if result == nil then
     -- A run is not the only behaviour a declaration has. "It loads, and it is sound" is
@@ -323,7 +425,7 @@ function observe.scenario(record, name)
   else
     say_script(given, result)
     when:say(string.format("the agent is asked %s", q(record.prompt or "")))
-    say_behaviour(then_, result, world)
+    say_behaviour(then_, result, world, record.stores, keep)
   end
 
   local out = { "  Scenario: " .. (name or ("observed — " .. tostring(record.prompt or ""))) }
@@ -333,12 +435,61 @@ function observe.scenario(record, name)
       if list.said[i].doc ~= nil then
         out[#out + 1] = doc_block(list.said[i].doc, "      ")
       end
+      if list.said[i].rows ~= nil then
+        out[#out + 1] = table_block(list.said[i].rows, "      ")
+      end
     end
   end
   write(given, "Given ")
   write(when, "When ")
   write(then_, "Then ")
 
+  local gaps = {}
+  for _, list in ipairs({ given, when, then_ }) do
+    for i = 1, #list.gaps do gaps[#gaps + 1] = list.gaps[i] end
+  end
+  return table.concat(out, "\n") .. "\n", gaps
+end
+
+--- A run as it goes, as the text of a scenario so far (docs/spec/agent-file.md). The
+--- record carries `result` with the calls made so far (`stop` nil while it runs), `prompt`,
+--- and `log`, the history's log of the files it wrote (spec/history.md), whose texts are
+--- the Then lines about files. What the world was given is not said: a live run's world is
+--- the real one. Answers the text and the gaps.
+function observe.live(record, name)
+  if type(record) ~= "table" or type(record.result) ~= "table" then
+    error("observe.live: a record carries a result", 2)
+  end
+  local result = record.result
+  local given, when, then_ = steps(), steps(), steps()
+  say_script(given, result)
+  when:say(string.format("the agent is asked %s", q(record.prompt or "")))
+  if result.stop ~= nil then
+    then_:say(string.format("it stops with %s", tostring(result.stop)))
+    then_:say(string.format("it takes %d step%s", result.steps or 0, (result.steps == 1) and "" or "s"))
+  end
+  say_calls(then_, result.calls)
+  for i = 1, #(result.notes or {}) do then_:say(string.format("it notes %s", q(result.notes[i]))) end
+  local log = record.log
+  for _, path in ipairs((log and log.order) or {}) do
+    local f = log.files[path]
+    if f and f.wrote and not f.removed and type(f.after) == "string" then
+      then_:say(string.format("the file %s holds:", q(path)), f.after)
+    elseif f and f.removed then
+      then_:gap("a file was removed", "a Then line for a file the run deleted")
+    end
+  end
+  local out = { "  Scenario: " .. (name or ("observed — " .. tostring(record.prompt or ""))) }
+  local function write(list, first)
+    for i = 1, #list.said do
+      out[#out + 1] = "    " .. ((i == 1) and first or "And ") .. list.said[i].text
+      if list.said[i].doc ~= nil then out[#out + 1] = doc_block(list.said[i].doc, "      ") end
+      if list.said[i].rows ~= nil then out[#out + 1] = table_block(list.said[i].rows, "      ") end
+    end
+  end
+  write(given, "Given ")
+  write(when, "When ")
+  write(then_, "Then ")
   local gaps = {}
   for _, list in ipairs({ given, when, then_ }) do
     for i = 1, #list.gaps do gaps[#gaps + 1] = list.gaps[i] end
@@ -391,7 +542,7 @@ function observe.gaps(list)
   return out
 end
 
--- ------------------------------------------------------------------------- agreement
+-- agreement
 
 local function then_texts(pickle)
   -- The behaviour half. A pickle carries no phase, so this is the part after the When --
@@ -453,14 +604,13 @@ function observe.agreement_text(a)
   return table.concat(out, "\n") .. "\n"
 end
 
--- ------------------------------------------------------------------------ repertoire
+-- repertoire
 
 --- Many observed scenarios, collapsed into the distinct behaviours they exhibit, each
 --- with the rate at which it occurred.
 ---
---- Over the Then lines and nothing else, so two runs that differ only in a model's
---- wording are one behaviour and two that differ in what they called are two.
---- Deterministic: no model judges the clustering.
+--- Over the Then lines and nothing else, so two runs differing only in a model's wording
+--- are one behaviour. Deterministic: no model judges the clustering.
 function observe.repertoire(observations)
   if type(observations) ~= "table" then
     error("observe.repertoire: a list of pickles", 2)
@@ -489,22 +639,15 @@ function observe.repertoire(observations)
   return out
 end
 
--- ---------------------------------------------------------- the repertoire, kept
+-- The repertoire: behavioural memory. A record of what this agent actually does, in a
+-- form that can be re-run and compared. Self-editing depends on it, because that class of
+-- system fails silently -- a pass rate rises while the repertoire shrinks.
 --
--- A repertoire is BEHAVIOURAL MEMORY: not text to retrieve, but a record of what this
--- agent actually does, in a form that can be re-run and compared. It is the safety rail
--- everything self-editing depends on, because the way that class of system fails is
--- silent -- a pass rate goes UP while the repertoire quietly SHRINKS, and nothing else
--- in the harness would notice.
+-- Kept as a FEATURE FILE, so it is re-runnable by `behaviour.lua`, readable by a person,
+-- and diffable by git, with no new writer, reader or format.
 --
--- It is kept as a FEATURE FILE, and that is the whole design. A new format would need a
--- new writer, a new reader and a new set of bugs; a feature file is read by `gherkin.lua`
--- and run by `behaviour.lua`, both of which already exist and are already measured. So
--- the memory is re-runnable, a person can read it, and `git diff` says what changed.
---
--- Each distinct behaviour is one scenario, carrying `@seen-n-of-total` -- how often the
--- agent did this, out of how many runs. The scenario's own Then half is its identity,
--- which is exactly the identity `observe.repertoire` already collapses on.
+-- Each distinct behaviour is one scenario carrying `@seen-n-of-total`. The scenario's Then
+-- half is its identity, which is what `observe.repertoire` already collapses on.
 
 local function tag_counts(tags)
   for i = 1, #(tags or {}) do
@@ -544,9 +687,8 @@ end
 
 --- One pickle, written back out as the scenario it came from.
 ---
---- `observe.scenario` writes a RUN; this writes a PICKLE, which is what a repertoire
---- holds. Doc strings come back as doc strings, so a scenario that stated a file's
---- contents states them again and the round trip holds.
+--- `observe.scenario` writes a RUN; this writes a PICKLE, which is what a repertoire holds.
+--- Doc strings come back as doc strings, so the round trip holds.
 function observe.pickle_text(pickle, name)
   if type(pickle) ~= "table" or type(pickle.steps) ~= "table" then
     error("observe.pickle_text: a pickle, and arrived as " .. type(pickle), 2)
@@ -562,10 +704,9 @@ function observe.pickle_text(pickle, name)
        or text == "the declaration is loaded" then
       phase = "When"
     end
-    -- The first line of a phase carries its keyword and the rest carry `And`. Writing
-    -- `And` for the first Then would still PARSE -- a pickle has no phase -- and would
-    -- read to a person as another When, which is a memory that misinforms the one
-    -- audience it was written for.
+    -- The first line of a phase carries its keyword, the rest carry `And`. Writing `And`
+    -- for the first Then would still parse -- a pickle has no phase -- but reads to a
+    -- person as another When.
     out[#out + 1] = "    " .. ((opened == phase) and "And " or (phase .. " ")) .. text
     opened = phase
     if phase == "When" then phase = "Then" end
@@ -578,9 +719,8 @@ end
 
 --- A repertoire read back from what `repertoire_feature` wrote.
 ---
---- Answers the same shape `observe.repertoire` does, so a stored repertoire and a fresh
---- one are the same kind of thing and `repertoire_diff` cannot tell them apart. That is
---- the property that makes the memory useful rather than merely written down.
+--- Answers the same shape `observe.repertoire` does, so a stored repertoire and a fresh one
+--- are the same kind of thing and `repertoire_diff` cannot tell them apart.
 function observe.repertoire_read(text)
   if type(text) ~= "string" then
     error("observe.repertoire_read: the text of a feature file, and arrived as " .. type(text), 2)
@@ -603,10 +743,8 @@ end
 
 --- Two repertoires, set against each other.
 ---
---- `lost` is the one that matters and is why this exists. A behaviour the agent used to
---- have and no longer has is invisible to a pass rate -- the rate can RISE while the
---- agent quietly stops doing half of what it did -- and that is precisely how a
---- self-editing loop goes wrong without anybody noticing.
+--- `lost` is why this exists: a behaviour the agent no longer has is invisible to a pass
+--- rate, which can RISE while the agent quietly stops doing half of what it did.
 function observe.repertoire_diff(before, after)
   if type(before) ~= "table" or type(after) ~= "table" then
     error("observe.repertoire_diff: two repertoires", 2)

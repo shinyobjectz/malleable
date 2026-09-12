@@ -2,11 +2,9 @@
 -- harness, never to the tool, and a refusal is an ordinary answer the model reads
 -- rather than an exception it cannot see.
 --
--- The whole of the world arrives as arguments. This file opens nothing, names no
--- vendor, holds no module-level state, and never runs a tool body. Two gates in one
--- process cannot see each other, and neither survives the run.
---
--- Everything here fails closed: when the gate does not know, the answer is no.
+-- The world arrives as arguments: this file opens nothing, names no vendor, holds no
+-- module-level state and never runs a tool body. Two gates in one process cannot see each
+-- other. Everything fails closed -- when the gate does not know, the answer is no.
 
 local approval = {}
 
@@ -23,7 +21,7 @@ local ENTRY_KEYS = { allow = true, deny = true, tool = true, when = true, reason
 local OPT_KEYS   = { port = true, policy = true, trust = true }
 local SCOPES     = { tool = true, args = true }
 
--- ------------------------------------------------------------------ small text
+-- small text
 
 local function clip(s, n)
   if type(s) ~= "string" then s = tostring(s) end
@@ -54,14 +52,11 @@ local function render(v)
   return "a " .. t
 end
 
--- ------------------------------------------------------------------ the memory key
+-- the memory key
 
--- Only top-level strings, numbers and booleans take part. A table argument means no
--- key can be built, which is why a cyclic argument table cannot hang this: nothing
--- ever steps inside one.
---
--- Every piece is length-prefixed, so no two different argument sets can render to
--- one string however hostile their contents.
+-- Only top-level strings, numbers and booleans take part; a table argument means no key
+-- can be built, so a cyclic argument table cannot hang this. Every piece is
+-- length-prefixed, so no two argument sets render to one string.
 local function piece(s)
   return #s .. ":" .. s
 end
@@ -94,7 +89,7 @@ local function args_key(tool, args)
   return table.concat(out, "|")
 end
 
--- ------------------------------------------------------------------ construction
+-- construction
 
 -- Every check returns a sentence rather than raising, so approval.new can raise once,
 -- at level 2, and point the message at the declaration file that got it wrong.
@@ -233,7 +228,7 @@ local function ask_of(p)
   return nil, "the approval port needs ask = function (request)"
 end
 
--- ------------------------------------------------------------------ decisions
+-- decisions
 
 local Gate = {}
 Gate.__index = Gate
@@ -287,7 +282,7 @@ local function policy_denial(entry, extra_text)
   return decide(false, "policy", why, { policy = entry.index })
 end
 
--- ------------------------------------------------------------------ the memory
+-- the memory
 
 local function recall(gate, tool, args)
   if gate.count == 0 then return nil end
@@ -382,7 +377,7 @@ function Gate:remembered()
   return out
 end
 
--- ------------------------------------------------------------------ the answer
+-- the answer
 
 -- Reads every shape a port may answer in: the four words, a boolean, nil, this
 -- document's { answer = ..., reason = ..., scope = ... }, and spec/port.md's
@@ -438,14 +433,18 @@ local function read_answer(v)
         local as = REMEMBER_AS[v.remember:lower()]
         if as then keep, scope = true, as end
       end
-      return { allowed = v.allow, keep = keep, scope = scope, reason = reason }
+      -- The person's own values for what they may change (spec/port.md, "The approval
+      -- port") travel with the decision; a gate that dropped them made every
+      -- `letting the person change` line a dead letter (found by showcase/03-gates.feature).
+      local args = type(v.args) == "table" and v.args or nil
+      return { allowed = v.allow, keep = keep, scope = scope, reason = reason, args = args }
     end
     return nil, "a table with no answer in it"
   end
   return nil, render(v)
 end
 
--- ------------------------------------------------------------------ check
+-- check
 
 local function ask_port(gate, tool, args, call)
   if not gate.ask_fn then
@@ -483,7 +482,7 @@ local function ask_port(gate, tool, args, call)
   if answer.reason then why = why .. ": " .. answer.reason end
 
   if not answer.keep then
-    return decide(answer.allowed, "port", why, { asked = true })
+    return decide(answer.allowed, "port", why, { asked = true, args = answer.args })
   end
 
   local kept, fault = gate:remember(tool, answer.allowed, answer.scope, args)
@@ -494,7 +493,7 @@ local function ask_port(gate, tool, args, call)
       why .. " -- this call only, because " .. fault, { asked = true })
   end
   return decide(answer.allowed, "port", why,
-    { asked = true, remembered = true, scope = answer.scope })
+    { asked = true, remembered = true, scope = answer.scope, args = answer.args })
 end
 
 local function resolve(gate, call)
@@ -573,7 +572,7 @@ function Gate:check(call)
     "the approval gate could not read this request: " .. text_of(d))
 end
 
--- ------------------------------------------------------------------ new
+-- new
 
 -- The one entry point that raises. A malformed policy is a defect in a declaration
 -- file, and it belongs to the moment that file is loaded, not to the moment two

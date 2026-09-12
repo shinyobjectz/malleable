@@ -3,9 +3,8 @@
 -- Three questions about one list of messages: how big is it, is that too big, and
 -- which stretch of it can be folded into one short note so the run continues.
 --
--- Rule 1 holds here exactly as it holds in turn.lua: this file names no provider, no
--- transport, no clock and no filesystem. The one thing it needs from the world is a
--- model, and it gets that from the port table the host hands in.
+-- Rule 1 holds as in turn.lua: no provider, transport, clock or filesystem is named. The
+-- one thing it needs from the world is a model, from the port table the host hands in.
 
 local compaction = {}
 
@@ -19,7 +18,6 @@ local function fail(fmt, ...)
   error(string.format(fmt, ...), 3)
 end
 
--- ---------------------------------------------------------------------------
 -- The estimate
 
 local function walk(v, depth, st)
@@ -69,7 +67,6 @@ local function message_estimate(m)
   return n + FRAME, info.truncated
 end
 
--- ---------------------------------------------------------------------------
 -- Limits
 
 compaction.defaults = { window = 128000, headroom = 0.75, target = 0.5, keep_recent = 6, attempts = 2 }
@@ -128,7 +125,6 @@ local function resolve(limits)
   return out
 end
 
--- ---------------------------------------------------------------------------
 -- The history and its protections
 
 -- Both vocabularies for the model's own turn are read: spec/port.md calls it "agent",
@@ -189,7 +185,6 @@ local function protections(h, n, keep_recent)
   return prot, last_turn
 end
 
--- ---------------------------------------------------------------------------
 -- check
 
 local function measure(h, lim)
@@ -232,7 +227,6 @@ function compaction.check(history, limits)
   return report
 end
 
--- ---------------------------------------------------------------------------
 -- plan
 
 -- The message a fold leaves behind, with the digest text it will carry.
@@ -331,7 +325,6 @@ function compaction.plan(history, limits)
   return nil, why
 end
 
--- ---------------------------------------------------------------------------
 -- prompt
 
 local function check_plan(p)
@@ -420,7 +413,6 @@ function compaction.prompt(plan, limits)
   }, words
 end
 
--- ---------------------------------------------------------------------------
 -- apply
 
 function compaction.apply(history, plan, digest)
@@ -450,7 +442,6 @@ function compaction.apply(history, plan, digest)
   return out
 end
 
--- ---------------------------------------------------------------------------
 -- compact
 
 local function port_call(port)
@@ -466,11 +457,10 @@ local function port_call(port)
   fail("compact needs a port with model.call")
 end
 
--- What a raise says, with Lua's own location off the front. `error("x")` prepends
--- "<chunk>:<line>: ", and the chunk is a host absolute path; port.md promises a message
--- that is safe to show a model and carries no host path, and a raise is the one route
--- that escapes that promise. Only a prefix that looks like a source location is trimmed,
--- so a message that merely contains a colon survives whole.
+-- What a raise says, with Lua's own location off the front: `error("x")` prepends
+-- "<chunk>:<line>: " and the chunk is a host absolute path, which port.md forbids showing
+-- a model. Only a prefix that looks like a source location is trimmed, so a message that
+-- merely contains a colon survives whole.
 local function raised_message(v)
   if type(v) ~= "string" then return show(v) end
   local where, rest = v:match("^(.-):%d+: (.*)$")

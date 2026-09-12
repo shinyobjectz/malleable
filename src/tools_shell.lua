@@ -1,16 +1,13 @@
 -- tools_shell — the shell tool.
 --
--- One command line, run in the workspace, reported exactly: standard output, standard
--- error, the exit code and how long it took. The whole world arrives on the context
--- table the harness hands a tool body, so every path in this file is reachable in a
--- test with no subprocess, no disk and no clock.
+-- One command line, run in the workspace, reported exactly: stdout, stderr, exit code and
+-- duration. The world arrives on the context table the harness hands a tool body, so every
+-- path here is reachable with no subprocess, disk or clock.
 --
--- The line the file is organized around: declaration-time wrongness raises, and
--- model-supplied wrongness never does. A model naming a directory outside the
--- workspace reads a refusal and tries again; a harness wired with no shell port is a
--- bug in the harness and stops there.
+-- Declaration-time wrongness RAISES; model-supplied wrongness never does. A model naming a
+-- directory outside the workspace reads a refusal and tries again.
 --
--- Nothing here holds state. The tables below are constants and are never written to.
+-- Nothing here holds state; the tables below are constants.
 
 local shell = {}
 
@@ -57,7 +54,6 @@ local function q(s)
   return string.format("%q", tostring(s))
 end
 
--- ---------------------------------------------------------------------------
 -- truncate
 
 local function is_continuation(b)
@@ -78,12 +74,10 @@ function shell.truncate(s, cap)
 
   local head = math.floor(cap * 0.4)
   local tail = cap - head
-  -- Move both cuts inward off a codepoint boundary, so neither retained piece begins
-  -- or ends inside a character. Bounded at three bytes, which is the longest run of
-  -- continuation bytes a valid character carries: a longer run is not a character at
-  -- all, so there is nothing there to protect. Unbounded, a stream of high bytes that
-  -- is not UTF-8 walks both cuts to zero and the tool keeps none of the output it was
-  -- asked to keep, which is the exact opposite of F10.
+  -- Move both cuts inward off a codepoint boundary, so neither piece begins or ends
+  -- inside a character. Bounded at three bytes, the longest run of continuation bytes a
+  -- valid character carries: unbounded, a stream of high bytes that is not UTF-8 walks
+  -- both cuts to zero and the tool keeps nothing.
   local moved = 0
   while head > 0 and moved < CONT_MAX and is_continuation(string.byte(s, head + 1)) do
     head = head - 1
@@ -102,15 +96,13 @@ function shell.truncate(s, cap)
   return kept, dropped
 end
 
--- ---------------------------------------------------------------------------
 -- options
 
 -- `acts` is a function (command line) -> { acts = {...}, unplaced = n }: what this tool's
--- OWN input did, in terms, so the trace can say it without the command line itself ever
--- leaving this file. It is handed IN rather than required, because this file reaches into
--- no sibling and that is asserted; `agent.shell` wires `src/command.lua` in, and a host
--- calling `shell.tool` directly may wire a reader of its own -- the bounded escape hatch
--- `spec/command.md` allows, where a host may answer more precisely and never differently.
+-- OWN input did, in terms, so the trace can say it without the command line leaving this
+-- file. Handed IN rather than required, because this file reaches into no sibling.
+-- `agent.shell` wires `src/command.lua` in; a host calling `shell.tool` directly may wire
+-- its own reader (spec/command.md).
 local OPTION_TYPE = {
   about = "string", ask = "boolean", cwd = "string",
   timeout_ms = "number", timeout_max = "number",
@@ -199,7 +191,6 @@ function shell.options(t)
   return o
 end
 
--- ---------------------------------------------------------------------------
 -- render
 
 local function block(lines, label, s, dropped, total, overflowed)
@@ -279,7 +270,6 @@ function shell.render(result)
   return table.concat(lines, "\n")
 end
 
--- ---------------------------------------------------------------------------
 -- the outcome contract
 
 local STATUSES = { exited = true, timeout = true, spawn_failed = true, unsupported = true }
@@ -305,7 +295,7 @@ local function contract_fault(v)
     end
   end
   -- An outcome that claims a clean exit and cannot say with what is worse than an
-  -- honest failure. A kill names a signal instead, and that is a different story.
+  -- honest failure. A kill names a signal instead.
   if v.status == "exited" and v.code == nil
     and not (type(v.signal) == "string" and v.signal ~= "") then
     return "The shell port said the command exited but did not say with what code."
@@ -313,7 +303,6 @@ local function contract_fault(v)
   return nil
 end
 
--- ---------------------------------------------------------------------------
 -- run
 
 -- Fill every field the contract names, derive `ok`, and render. One door out of `run`,
@@ -586,7 +575,6 @@ function shell.run(ctx, opts)
   return complete(r)
 end
 
--- ---------------------------------------------------------------------------
 -- the declaration
 
 -- The shape spec.lua's argument constructors build. Written out rather than borrowed,
@@ -600,9 +588,10 @@ end
 function shell.tool(t)
   local o = shell.options(t)
   return {
-    about = o.about,
-    ask   = o.ask,
-    args  = {
+    about  = o.about,
+    ask    = o.ask,
+    effect = "runs",
+    args   = {
       command    = param("string", true,  "the command line to run"),
       cwd        = param("string", false, "workspace-relative directory to run it in"),
       timeout_ms = param("number", false, "how long to allow, in milliseconds"),

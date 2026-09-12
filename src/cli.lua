@@ -25,6 +25,7 @@ local turn     = need_module("turn", true)
 local approval = need_module("approval", true)
 local capport  = need_module("port", true)
 local double   = need_module("double", true)
+local store    = need_module("store", true)
 -- Not required: the runner works without them, and an agent that declares no skill and
 -- no server never notices they are missing.
 local skills   = need_module("skills")
@@ -43,7 +44,7 @@ local MARK_STEPS   = "\1pi-steps\1"
 local RESULT_BYTES = 4096
 local ARG_BYTES    = 120
 
--- ------------------------------------------------------------------ tiny text
+-- tiny text
 
 local fmt = string.format
 
@@ -108,7 +109,7 @@ local function clip(s, n)
   return s:sub(1, n - 3) .. "..."
 end
 
--- ------------------------------------------------------------------- the codes
+-- the codes
 
 local STOP_CODE = { answered = 0, budget = 4, refused = 5, error = 6 }
 
@@ -138,7 +139,7 @@ cli.codes = setmetatable({}, {
 -- names it already knows. This list is that walk, and is part of the contract.
 cli.code_names = { "answered", "usage", "load", "declaration", "budget", "refused", "error", "world" }
 
--- ------------------------------------------------------------------ the parser
+-- the parser
 
 local TRUSTS = { trusted = true, ask = true, none = true }
 
@@ -162,6 +163,7 @@ local LONG = {
   ["--script"]         = { field = "script",         kind = "string" },
   ["--check"]          = { field = "check",          kind = "flag" },
   ["--verify"]         = { field = "verify",         kind = "flag" },
+  ["--talk"]           = { field = "talk",           kind = "flag" },
   ["--steps"]          = { field = "show_steps",     kind = "flag" },
   ["--heading"]        = { field = "heading",        kind = "flag" },
   ["--feature"]        = { field = "feature",        kind = "string" },
@@ -174,6 +176,17 @@ local LONG = {
   ["--width"]          = { field = "width",          kind = "int",   low = 20 },
   ["--no-colour"]      = { field = "colour",         kind = "const", value = false },
   ["--colour"]         = { field = "colour",         kind = "const", value = true },
+  ["--history"]        = { field = "history",        kind = "flag" },
+  ["--recall"]         = { field = "recall",         kind = "string" },
+  ["--evidence"]       = { field = "evidence",       kind = "string" },
+  ["--day"]            = { field = "day",            kind = "string" },
+  ["--since"]          = { field = "since",          kind = "string" },
+  ["--file"]           = { field = "file",           kind = "string" },
+  ["--stop"]           = { field = "stop",           kind = "string" },
+  ["--cause"]          = { field = "cause",          kind = "string" },
+  ["--agent"]          = { field = "agent",          kind = "string" },
+  ["--limit"]          = { field = "limit",          kind = "int",   low = 1 },
+  ["--like"]           = { field = "like",           kind = "string" },
   ["--help"]           = { field = "help",           kind = "flag" },
   ["--version"]        = { field = "version",        kind = "flag" },
 }
@@ -190,11 +203,16 @@ local KNOWN = {
   calls_per_step = true, max_depth = true, model = true, root = true,
   timeout = true, trust = true, allow = true, deny = true, yes = true,
   no = true, dry_run = true, reply = true, script = true, check = true,
-  verify = true, feature = true, show_steps = true,
+  verify = true, feature = true, show_steps = true, talk = true,
   show_tools = true, session = true, json = true, show_lines = true,
   quiet = true, verbose = true, width = true, colour = true, help = true,
   version = true, path = true, prompt_source = true, argv = true, words = true,
+  history = true, recall = true, evidence = true, day = true, since = true, file = true,
+  stop = true, cause = true, like = true, agent = true, limit = true,
 }
+
+-- The questions --history asks, each a field of history.find (docs/spec/history.md).
+local HISTORY_FIELDS = { "day", "since", "file", "stop", "cause", "agent", "like", "limit" }
 
 local function defaults()
   return {
@@ -204,6 +222,7 @@ local function defaults()
     allow = {}, deny = {}, yes = false, no = false,
     dry_run = false, reply = {}, script = nil,
     check = false, verify = false, feature = nil, show_steps = false, show_tools = false, session = nil, json = false,
+    talk = false,
     show_lines = 12, quiet = false, verbose = 0, width = nil, colour = nil,
     help = false, version = false,
     path = nil, prompt_source = "none", words = {}, argv = {},
@@ -323,6 +342,28 @@ function cli.parse(argv)
     return nil, which .. " is a scripted answer, and needs --dry-run"
   end
 
+  -- --history, --recall and --evidence read what the workspace kept, and need no
+  -- declaration: what follows --evidence's id is the part and which one.
+  local reading = o.history or o.recall ~= nil or o.evidence ~= nil
+  if (o.history and 1 or 0) + (o.recall and 1 or 0) + (o.evidence and 1 or 0) > 1 then
+    return nil, "--history, --recall and --evidence are three questions; ask one"
+  end
+  if not o.history then
+    for _, k in ipairs(HISTORY_FIELDS) do
+      if o[k] ~= nil then return nil, "--" .. k .. " narrows --history, which was not given" end
+    end
+  end
+  if reading then
+    if o.evidence == nil and #positional > 0 then
+      return nil, "--history and --recall take no file: " .. safe(positional[1])
+    end
+    if o.evidence ~= nil and #positional > 2 then
+      return nil, "--evidence takes an id, a part and at most one more word"
+    end
+    o.words = positional
+    return o
+  end
+
   -- `--steps` asks what the words are, which is a question about the harness and not
   -- about any declaration. Like `--help` and `--version`, it needs no file.
   if positional[1] == nil and not o.show_steps then
@@ -351,7 +392,7 @@ function cli.parse(argv)
   return o
 end
 
--- ----------------------------------------------------------------- the sandbox
+-- the sandbox
 
 local function blocked(name)
   error(MARK_BLOCKED .. 'unknown name "' .. tostring(name)
@@ -379,30 +420,14 @@ local function policy_entry(a, allow, v)
   a.policy[#a.policy + 1] = e
 end
 
--- The declaration surface itself: the `agent.*` names a file writes through, bound to
--- one agent table. Exposed rather than kept inside the sandbox because agent.lua binds
--- the same names for a file that is plain `require`d, and two definitions of one
--- surface is two surfaces that drift.
---
--- `tool` and `on` take both the curried form the surface reads in
--- (`agent.tool "read" { ... }`) and the two-argument form a host that builds a
--- declaration in code finds easier. Nothing here runs a body: rule 2.
--- The declaration as `behaviour` sees it: three verbs and four facts, and nothing that
--- would let a feature reach past the surface a host has.
---
--- ONE definition, here, for the same reason `cli.surface` is one: `agent.verify` and
--- `--verify` are two doors onto one thing, and two builders would be two vocabularies
--- that drift.
--- The built-in vocabulary, rendered. One source -- `src/behaviour.lua` holds the table
--- and nothing else does -- and three renderings: this, `agent.steps()`, and the stub
--- `behaviour.check` prints when a line matches nothing.
+-- The built-in vocabulary, rendered. `src/behaviour.lua` holds the one table; three
+-- renderings read it: this, `agent.steps()`, and the stub `behaviour.check` prints.
 function cli.steps_text(opts)
   local steps = behaviour.steps()
   local out = {}
-  -- The heading, when this is being written to a file rather than read at a terminal.
-  -- It lives here rather than at the top of `docs/STEPS.md`, because a generated file
-  -- with a hand-written header is a file the next regeneration silently eats -- which is
-  -- exactly what happened to it once.
+  -- The heading, when this is written to a file rather than read at a terminal. It lives
+  -- here rather than at the top of `docs/STEPS.md`, because a generated file with a
+  -- hand-written header loses it on the next regeneration.
   if opts ~= nil and opts.heading then
     out[#out + 1] = "# The built-in step vocabulary\n\n"
     out[#out + 1] = "GENERATED from `src/behaviour.lua` by "
@@ -410,15 +435,23 @@ function cli.steps_text(opts)
       .. "an expression is added in one place, and this is a rendering of it.\n\n"
     out[#out + 1] = "```\n"
   end
-  out[#out + 1] = fmt("The built-in vocabulary: %d expressions, version %d.\n",
-                      #steps, behaviour.VOCABULARY)
-  local phases = { { "given", "the world" }, { "when", "the run" }, { "then", "the result" } }
+  -- The is phase first: what the agent is, said in a feature's Background (spec/declare.md).
+  local declare = need_module("declare")
+  local is = declare and declare.vocabulary() or {}
+  for i = 1, #is do steps[#steps + 1] = is[i] end
+  out[#out + 1] = fmt("The built-in vocabulary: %d expressions, version %d; the is phase, version %d.\n",
+                      #steps, behaviour.VOCABULARY, declare and declare.VOCABULARY or 0)
+  local phases = { { "is", "the agent, in the Background" }, { "given", "the world" },
+                   { "when", "the run" }, { "then", "the result" } }
   for p = 1, #phases do
     out[#out + 1] = fmt("\n%s -- %s\n", phases[p][1], phases[p][2])
     for i = 1, #steps do
       if steps[i].phase == phases[p][1] then
-        out[#out + 1] = fmt("  %-58s %s%s\n", steps[i].expr, steps[i].about,
-                            steps[i].scripts_model and "  (dropped in an eval)" or "")
+        local tail = steps[i].scripts_model and "  (dropped in an eval)"
+          or (steps[i].reach and steps[i].reach ~= "neither" and ("  (" .. steps[i].reach
+              .. (steps[i].gate and "; a gate, never removed by an agent" or "") .. ")"))
+          or ""
+        out[#out + 1] = fmt("  %-58s %s%s\n", steps[i].expr, steps[i].about, tail)
       end
     end
   end
@@ -426,11 +459,67 @@ function cli.steps_text(opts)
   return table.concat(out)
 end
 
+-- The declaration as `behaviour` sees it: three verbs and four facts, and nothing that
+-- would let a feature reach past the surface a host has. Defined once, here, because
+-- `agent.verify` and `--verify` are two doors onto one thing.
+--- What the model is told each tool is, for a host that has only the prefix.
+function cli.spec_schema(a) return spec.schema(a) end
+
 function cli.drivers(a, run, opts)
+  -- Every run a feature drives gets the declaration's stores as a view, whoever wrote
+  -- `run`: binding twice is harmless, and forgetting once would hand a tool the raw port.
+  -- The gate, as the live run builds it (cli.wire): the declaration's own policy and
+  -- trust over the world's ask port, so `it may never call`, `it may always call` and
+  -- `its trust is` hold in a scenario exactly as they hold in a run. Found missing by
+  -- showcase/13-policy.feature, 2026-09-12: before this, a feature could state a policy
+  -- and verify nothing about it.
+  if approval then
+    local plain = run
+    run = function (prompt, port, ropts)
+      local policy = {}
+      for i = 1, #(a.policy or {}) do policy[#policy + 1] = a.policy[i] end
+      local ok, gate = pcall(approval.new, { port = port, trust = a.trust or "ask", policy = policy })
+      if not ok then error("the approval policy is not usable: " .. tostring(gate), 0) end
+      local bound = cli.bind(port, gate, {})
+      return plain(prompt, bound, ropts)
+    end
+  end
+  if store then
+    local plain = run
+    run = function (prompt, port, ropts) return plain(prompt, store.bind(a, port), ropts) end
+  end
+  -- The servers, as the live run connects them: the world's mcp port says what each
+  -- offers, and the tools are in the schema before the first model call.
+  if mcp then
+    local plain = run
+    run = function (prompt, port, ropts)
+      if type(a.server_order) == "table" and #a.server_order > 0 then pcall(mcp.connect, a, port) end
+      return plain(prompt, port, ropts)
+    end
+  end
+  -- The skill tool and the skills briefing, as the live run has them (cli.main, "the two
+  -- seams"): a feature that says `it keeps a skill` can then verify the model reading it.
+  -- Declared skills are reachable before any world; a workspace's only with the port.
+  if skills then
+    pcall(skills.ensure, a, nil)
+    local inner = run
+    run = function (prompt, port, ropts)
+      pcall(skills.ensure, a, port)
+      local ok, system = pcall(skills.system, a, port)
+      if ok and system then
+        local o = {}
+        for k, v in pairs(ropts or {}) do o[k] = v end
+        o.system = system
+        ropts = o
+      end
+      return inner(prompt, port, ropts)
+    end
+  end
   local d = {
     run = run,
     check = function (world, o) return turn.check(a, world, o) end,
     steps = {}, tools = {}, asks = {}, beats = {},
+    stores = a.stores, schema = function () return spec.schema(a) end,
   }
   for i = 1, #a.order do
     d.tools[a.order[i]] = true
@@ -460,12 +549,19 @@ function cli.drivers(a, run, opts)
   return d
 end
 
+-- The declaration surface: the `agent.*` names a file writes through, bound to one agent
+-- table. Exposed rather than kept inside the sandbox, because agent.lua binds the same
+-- names for a file that is plain `require`d and one surface should have one definition.
+--
+-- `tool` and `on` take the curried form (`agent.tool "read" { ... }`) and the two-argument
+-- form. Nothing here runs a body (rule 2).
 function cli.surface(a)
   local surface = {
     name   = function (v) spec.set_name(a, v) end,
     model  = function (v) spec.set_model(a, v) end,
     system = function (v) spec.set_system(a, v) end,
     budget = function (v) spec.set_budget(a, v) end,
+    reasoning = function (v) spec.set_reasoning(a, v) end,
     tool   = function (n, t)
       if t == nil then return function (d) return spec.add_tool(a, n, d) end end
       return spec.add_tool(a, n, t)
@@ -488,6 +584,11 @@ function cli.surface(a)
       if d == nil then return function (x) return spec.add_server(a, n, x) end end
       return spec.add_server(a, n, d)
     end,
+    -- A store: the shape of what the program keeps. The rows are the host's (src/store.lua).
+    store  = function (n, d)
+      if d == nil then return function (x) return spec.add_store(a, n, x) end end
+      return spec.add_store(a, n, d)
+    end,
     -- A step of a feature file. On the surface rather than beside it, so a declaration
     -- loaded in the sandbox can declare one: a feature is not a thing only a host gets.
     step   = function (e, d)
@@ -506,6 +607,44 @@ function cli.surface(a)
   }
   for k, v in pairs(spec.types) do surface[k] = v end
   return surface
+end
+
+-- A declaration gets its own copy of each library table. Handing it the real ones let a
+-- file replace string.find for the whole process, and port.path_ok is built from string
+-- functions, so poisoning them let `../` through every real filesystem port. A method call
+-- on a string still reaches the real table through the string metatable, which nothing in
+-- the sandbox can name.
+local function library_copy(t, without)
+  local out = {}
+  for k, v in pairs(t) do
+    if not (without and without[k]) then out[k] = v end
+  end
+  return out
+end
+
+-- A declaration's pcall and xpcall catch everything except the step bound, which they
+-- hand straight back up. And xpcall runs its handler as an ordinary call once the error
+-- has unwound, rather than inside the error machinery, where a handler that never
+-- returned was out of the bound's reach. A declaration has no `debug`, so the stack the
+-- handler sees is not something it can tell apart.
+local function packed(...) return { n = select("#", ...), ... } end
+local unpacked = table.unpack or unpack
+
+local function is_bound(e)
+  return type(e) == "string" and e:find(MARK_STEPS, 1, true) ~= nil
+end
+
+local function bounded_pcall(f, ...)
+  local r = packed(pcall(f, ...))
+  if not r[1] and is_bound(r[2]) then error(r[2], 0) end
+  return unpacked(r, 1, r.n)
+end
+
+local function bounded_xpcall(f, handler, ...)
+  local r = packed(pcall(f, ...))
+  if r[1] then return unpacked(r, 1, r.n) end
+  if is_bound(r[2]) then error(r[2], 0) end
+  return false, handler(r[2])
 end
 
 -- The environment a declaration runs in, and the fresh agent table it writes into.
@@ -539,8 +678,10 @@ function cli.sandbox(cfg)
     assert   = assert, error = error, ipairs = ipairs, pairs = pairs, next = next,
     select   = select, tonumber = tonumber, tostring = tostring, type = type,
     unpack   = table.unpack or unpack,
-    pcall    = pcall, xpcall = xpcall,
-    math     = math, string = string, table = table,
+    pcall    = bounded_pcall, xpcall = bounded_xpcall,
+    math     = library_copy(math),
+    string   = library_copy(string, { dump = true }),
+    table    = library_copy(table),
   }
 
   -- A declaration that narrates itself writes to the error stream, never to the
@@ -569,7 +710,7 @@ function cli.sandbox(cfg)
   return env, a, wrote
 end
 
--- -------------------------------------------------------------------- the load
+-- the load
 
 local DEFAULT_LIMITS = { max_bytes = 262144, max_steps = 10000000 }
 
@@ -616,7 +757,20 @@ local function run_bounded(chunk, max_steps)
   local compiler = type(jit) == "table" and type(jit.off) == "function" and jit
   if compiler then compiler.off(chunk, true) end
   local co = coroutine.create(chunk)
-  debug.sethook(co, function () error(MARK_STEPS, 2) end, "", max_steps)
+  -- The bound is sticky. Once it trips, every later instruction raises too, so a
+  -- declaration's own `pcall` can catch the first error but cannot keep the loop alive:
+  -- `while true do pcall(function () while true do end end) end` raises again the moment
+  -- control is back outside the pcall.
+  -- LuaJIT's hooks are global rather than per coroutine, so each one raises only while
+  -- the declaration is the thread running, never in the loader that resumed it.
+  local function every_step()
+    if coroutine.running() == co then error(MARK_STEPS, 2) end
+  end
+  debug.sethook(co, function ()
+    if coroutine.running() ~= co then return end
+    debug.sethook(co, every_step, "", 1)
+    error(MARK_STEPS, 2)
+  end, "", max_steps)
   local ok, e = coroutine.resume(co)
   debug.sethook(co)
   if compiler and type(compiler.on) == "function" then compiler.on(chunk, true) end
@@ -672,6 +826,30 @@ function cli.load(path, world, limits)
     return nil, { code = "empty", message = "the file declares nothing" }
   end
 
+  -- A feature file whose Background says what the agent is: the whole agent, in Gherkin
+  -- (spec/declare.md). Nothing runs; a file a line names is read through the host, beside
+  -- this one.
+  if path:match("%.feature$") then
+    local declare = need_module("declare", true)
+    local dir = path:match("^(.*)[/\\][^/\\]*$")
+    local a = spec.new()
+    local info, why = declare.apply(text, a, {
+      read = function (named)
+        if dir and not named:match("^/") then named = dir .. "/" .. named end
+        return world.read(named)
+      end,
+    })
+    if not info then
+      return nil, { code = "syntax", message = path .. ": " .. tostring(why), line = tonumber(tostring(why):match("^line (%d+)")) }
+    end
+    if info.count == 0 then
+      return nil, { code = "empty", message = "this feature says what the agent does and not what it is: "
+        .. "name the declaration, or say what it is in the Background (spec/declare.md)" }
+    end
+    a.load_notes, a.load_wrote = {}, {}
+    return a
+  end
+
   local notes = {}
   local env, a, wrote = cli.sandbox {
     file = path,
@@ -706,7 +884,7 @@ function cli.load(path, world, limits)
   return a, warning
 end
 
--- ---------------------------------------------------------------- the problems
+-- the problems
 
 -- What spec says, plus what the runner itself requires. Never raises.
 function cli.problems(agent, opts)
@@ -738,7 +916,7 @@ function cli.problems(agent, opts)
   return out
 end
 
--- --------------------------------------------------------------------- wiring
+-- wiring
 
 local function yes_port(record)
   return { request = function (q)
@@ -800,6 +978,9 @@ function cli.wire(opts, world, agent)
   local cfg = {
     root = opts.root, model = opts.model, timeout = opts.timeout,
     trust = opts.trust, session = opts.session,
+    -- A conversation runs its talker and its jobs in coroutines: ports that yield their
+    -- waits let a job's model call sit in the background (spec/speech.md, "Waits").
+    yielding = opts.talk or nil,
   }
 
   local p
@@ -912,15 +1093,15 @@ function cli.wire(opts, world, agent)
   return p, gate, warnings, asked
 end
 
--- ------------------------------------------------------------------- the bind
+-- the bind
 
 -- The adapter between the port table spec/port.md describes and the two functions
--- spec/turn.md wants. It is the only file in the tree that knows both shapes, and it
--- exists so the mismatch lives in one named function with its own tests.
+-- spec/turn.md wants -- the only file that knows both shapes, so the mismatch lives in one
+-- named function with its own tests.
 --
--- It also carries the one fact neither document states: turn asks only for tools that
--- declared `ask`, so the request it forwards to the gate is marked `ask = true`. A
--- gate that did not know would let every asking tool through on the flag rule.
+-- It carries the one fact neither document states: turn asks only for tools that declared
+-- `ask`, so the request it forwards is marked `ask = true`. A gate that did not know would
+-- let every asking tool through on the flag rule.
 function cli.bind(p, gate, opts)
   local notes = {}
   local t = {}
@@ -963,7 +1144,7 @@ function cli.bind(p, gate, opts)
       return { stop = true, why = d.reason }
     end
     if d.allowed == true then
-      return { allow = true, why = d.reason }
+      return { allow = true, why = d.reason, args = d.args }
     end
     -- There is no path from any answer, any port failure or any missing port to an
     -- allow that a human did not take.
@@ -975,7 +1156,7 @@ function cli.bind(p, gate, opts)
   return t, notes
 end
 
--- ----------------------------------------------------------------- the renderer
+-- the renderer
 
 local function sorted_keys(t)
   local nums, strs, other = {}, {}, {}
@@ -1082,6 +1263,7 @@ local function summary_of(result, info)
   end
   if info.elapsed then line = line .. ", " .. fmt("%.1fs", info.elapsed) end
   if info.dry then line = line .. ", DRY" end
+  if type(result.entry) == "string" then line = line .. ", kept as " .. result.entry end
   return line
 end
 
@@ -1242,7 +1424,7 @@ function cli.colour_on(opts, world)
   return world.colour == true
 end
 
--- --------------------------------------------------------------------- the plan
+-- the plan
 
 -- --dry-run with no script runs no model at all and prints what would happen.
 function cli.plan(agent, opts, p, gate)
@@ -1368,7 +1550,7 @@ function cli.render_plan(plan, opts)
   return safe(table.concat(out, "\n") .. "\n")
 end
 
--- ---------------------------------------------------------------- usage, tools
+-- usage, tools
 
 local USAGE = [[
 pi [options] <declaration.lua> [prompt words ...]
@@ -1394,9 +1576,20 @@ pi [options] <declaration.lua> [prompt words ...]
       --tools             print the tool schema the model would be sent
       --session PATH      save the transcript as one session record
       --verify           run the feature beside the declaration, against the doubles
+      --talk             a conversation: a fast talker answers each line typed, and hands
+                         work to this agent as background jobs; an empty line waits for
+                         the jobs (spec/speech.md)
       --steps            print the built-in step vocabulary and exit
       --heading          with --steps, write it as the whole of docs/STEPS.md
       --feature PATH     run that feature file instead of the sibling one
+      --history          the runs kept at --root, best first; narrowed by --day D,
+                         --since D, --file PATH (a folder ends in /), --stop S,
+                         --cause C, --agent NAME, --like ID; --limit N lines (10)
+      --recall ID        one kept run's story (any part of the id that names one will do)
+      --evidence ID PART [WHICH]
+                         one part of its evidence: calls, call N, transcript, errors,
+                         commands, files, diff PATH, kept N, model or all
+                         (docs/spec/history.md)
       --json              print one JSON object on stdout; human text to stderr
       --show-lines N      lines of a tool result to render (default 12)
   -q, --quiet             print the final answer and nothing else
@@ -1442,7 +1635,7 @@ local function check_text(agent, opts)
   return safe(table.concat(out, "\n") .. "\n")
 end
 
--- --------------------------------------------------------------------- the JSON
+-- the JSON
 
 local function json_string(s)
   local body = tostring(s):gsub('[%c"\\]', function (c)
@@ -1474,11 +1667,9 @@ local function calls_for_json(calls)
   return out
 end
 
--- One object, encoded with the tree's own encoder, so there is exactly one JSON
--- implementation here and its edge cases are already tested. When the encode fails
--- the fallback carries the run's own code: printing 6 while the process exited 0
--- would make the object and the exit status disagree, which is the one thing a
--- machine-readable mode must never do.
+-- One object, encoded with the tree's own encoder, so there is one JSON implementation
+-- and its edge cases are already tested. On an encode failure the fallback carries the
+-- run's own code: the object and the exit status must never disagree.
 local function json_object(object, code)
   local sessions = need_module("session", false)
   local text, why
@@ -1493,7 +1684,7 @@ local function json_object(object, code)
   return text .. "\n"
 end
 
--- ------------------------------------------------------------------- the prompt
+-- the prompt
 
 local function resolve_prompt(opts, world)
   local src = opts.prompt_source
@@ -1523,7 +1714,7 @@ local function resolve_prompt(opts, world)
   return ""
 end
 
--- ------------------------------------------------------------------ the session
+-- the session
 
 local ROLE_AT = 0
 
@@ -1581,7 +1772,7 @@ local function save_session(opts, world, p, agent, result)
   return true, nil
 end
 
--- ---------------------------------------------------------------------- the run
+-- the run
 
 -- Everything after parsing. Returns `code, result`, or `nil, err` when the run never
 -- started, with err.code the exit code cli.main should use.
@@ -1650,7 +1841,9 @@ function cli.run(opts, world)
   end
   -- `--check` on its own looks at the declaration; with a feature named it looks at the
   -- feature, which is the branch below. One flag, one meaning: look before you run.
-  if opts.check and not (opts.verify or opts.feature) then
+  -- A declaration written as a feature is checked as one: its scenarios with it.
+  local whole = type(opts.path) == "string" and opts.path:match("%.feature$") ~= nil
+  if opts.check and not (opts.verify or opts.feature or whole) then
     return report(check_text(agent, opts), {
       agent = agent.name, model = agent.model, code = codes.answered,
       budget = opts.budget or agent.budget, tools = spec.schema(agent),
@@ -1661,17 +1854,28 @@ function cli.run(opts, world)
   -- A feature file: what the agent DOES, run against the doubles. No prompt is resolved,
   -- because the scenario's `When` line is the prompt, and no real port is reached --
   -- `--verify` has no door to one.
-  if opts.verify or opts.feature then
+  if opts.verify or opts.feature or (opts.check and whole) then
     if not (gherkin and behaviour) then
       return nil, { code = codes.world, message = "this build has no feature reader" }
     end
-    local at = opts.feature or (tostring(opts.path):gsub("%.lua$", "") .. ".feature")
+    -- A declaration written as a feature is its own feature file.
+    local at = opts.feature
+      or (tostring(opts.path):match("%.feature$") and opts.path)
+      or (tostring(opts.path):gsub("%.lua$", "") .. ".feature")
     local text, why_read = world.read(at)
     if text == nil then
       return nil, { code = codes.usage,
         message = at .. ": " .. (why_read == "missing" and "no such feature file" or tostring(why_read)) }
     end
-    local pickles, bad = gherkin.pickle(text)
+    -- The is lines come out and the shorthands are expanded (spec/declare.md). A feature
+    -- that says what the agent is, beside a Lua declaration, is two declarations of one
+    -- agent, and the runner will not guess which one wins.
+    local declare = need_module("declare", true)
+    if at ~= opts.path and declare.declares(text) then
+      return nil, { code = codes.usage, message = at .. " says what the agent is, so it is the declaration: "
+        .. "run it as one, --verify " .. at }
+    end
+    local pickles, bad = declare.pickles(text, agent)
     if not pickles then
       return nil, { code = codes.declaration, message = at .. " cannot be read:", lines = { bad } }
     end
@@ -1680,7 +1884,12 @@ function cli.run(opts, world)
       if ropts and ropts.budget then topts.budget = ropts.budget end
       if opts.budget then topts.budget = opts.budget end
       if type(agent.name) == "string" then topts.id = agent.name end
-      return turn.run(agent, prompt, port, topts)
+      local bound = store.bind(agent, port)
+      local depth = declare.enter(bound)
+      local ok, result = pcall(turn.run, agent, prompt, bound, topts)
+      declare.leave(depth)
+      if not ok then error(result, 0) end
+      return result
     end)
 
     if opts.check then
@@ -1697,6 +1906,8 @@ function cli.run(opts, world)
     world.out(behaviour.report(report, { verbose = (opts.verbose or 0) >= 1 }))
     return report.ok and codes.answered or codes.declaration
   end
+
+  if opts.talk then return cli.talk(opts, world, agent) end
 
   local prompt, why = resolve_prompt(opts, world)
   if prompt == nil then
@@ -1762,7 +1973,20 @@ function cli.run(opts, world)
   end
 
   local t0 = tick()
-  local ran, result = pcall(turn.run, agent, prompt, tport, topts)
+  -- The world a delegate declared in a feature file hands its child, for this run.
+  local declare = need_module("declare")
+  local depth = declare and declare.enter(tport)
+  -- Kept as a `cli` entry when the world has a history (docs/spec/history.md), with the
+  -- feature text it was declared from.
+  local run = turn.run
+  local history = need_module("history")
+  if history then
+    run = history.keeper(turn.run)
+    local feature = type(opts.path) == "string" and opts.path:match("%.feature$") and world.read(opts.path) or nil
+    topts.entry = { cause = "cli", declaration = type(feature) == "string" and feature or nil }
+  end
+  local ran, result = pcall(run, agent, prompt, tport, topts)
+  if declare then declare.leave(depth) end
   if not ran then
     return nil, { code = codes.error, message = "the run could not start: " .. tostring(result) }
   end
@@ -1805,7 +2029,7 @@ function cli.run(opts, world)
       steps = result.steps, budget = result.budget,
       calls = calls_for_json(result.calls), notes = result.notes,
       transcript = result.transcript, err = result.err,
-      session = opts.session, saved = saved == true, code = code,
+      session = opts.session, saved = saved == true, code = code, entry = result.entry,
     }, code))
     world.err(human)
   else
@@ -1815,10 +2039,120 @@ function cli.run(opts, world)
   return code, result
 end
 
--- --------------------------------------------------------------------- the main
+-- --talk: a conversation, turn by turn (spec/speech.md, "The doors"). Each line typed is a
+-- turn; the talker answers it; work it hands off runs in the background while the next
+-- line is answered. An empty line waits for the jobs and hears their reports, and so does
+-- the end of the input, so a piped script of lines runs to its end.
+function cli.talk(opts, world, agent)
+  local speech = need_module("speech")
+  if not speech then return nil, { code = codes.world, message = "this build has no speech module" } end
+  if type(world.line) ~= "function" then
+    return nil, { code = codes.world, message = "--talk needs a host that reads a line at a time" }
+  end
+  local p, gate, warnings = cli.wire(opts, world, agent)
+  if p == nil then return nil, { code = codes.world, message = gate } end
+  for i = 1, #warnings do world.err("pi: " .. safe(warnings[i]) .. "\n") end
+  local tport = cli.bind(p, gate, opts)
+  local declare = need_module("declare")
+
+  local run = function (d, prompt, port, ropts)
+    local o = { calls_per_step = opts.calls_per_step, max_depth = opts.max_depth }
+    for k, v in pairs(ropts or {}) do o[k] = v end
+    local bound = store.bind(d, port)
+    local depth = declare and declare.enter(bound)
+    local ok, result = pcall(turn.run, d, prompt, bound, o)
+    if declare then declare.leave(depth) end
+    if not ok then error(result, 0) end
+    return result
+  end
+  local ok, c = pcall(speech.new, {
+    workers = { [agent.name] = agent }, world = tport, run = run,
+    job_budget = opts.budget, proactive = false,
+    -- --yes and --no answer the jobs' questions here; otherwise the person does, by talking
+    relay = not (opts.yes or opts.no),
+  })
+  if not ok then return nil, { code = codes.declaration, message = tostring(c) } end
+
+  local out = world.out
+  local function sleep()
+    if type(world.sleep) == "function" then pcall(world.sleep, 0.03) end
+  end
+  c.on = function (event, data)
+    if event == "job" then
+      if data.state == "running" and data.steps == 0 then
+        out("  (" .. data.id .. " started: " .. data.worker .. ")\n")
+      elseif data.state ~= "running" and data.state ~= "asking" and data.state ~= "starting" then
+        out("  (" .. data.id .. " " .. data.state .. ", " .. data.steps .. " steps)\n")
+      end
+    elseif event == "question" then
+      out("  (" .. data.id .. " asks to run " .. safe(data.tool) .. ")\n")
+    elseif event == "failed" then
+      out("  (the talker failed: " .. safe(tostring(data.reason)) .. ")\n")
+    end
+  end
+  local function running()
+    local n = 0
+    for _, j in ipairs(c:jobs()) do
+      if j.state == "running" or j.state == "starting" or j.state == "asking" then n = n + 1 end
+    end
+    return n
+  end
+  local function say_all()
+    local s = c:take()
+    local any = false
+    while s do out("  " .. c.talker.name .. ": " .. s .. "\n"); c:said(); any = true; s = c:take() end
+    return any
+  end
+  local function drive(done)
+    for _ = 1, 100000 do
+      c:update()
+      local said = say_all()
+      if done() then return end
+      if not said then sleep() end
+    end
+  end
+  local function wait_for_reports()
+    drive(function () return #c.reports > 0 or running() == 0 end)
+    if #c.reports > 0 then
+      c:deliver()
+      drive(function () return not c:busy() end)
+      return true
+    end
+    return false
+  end
+
+  out("talking to " .. agent.name .. " (" .. tostring(agent.model) .. ") through "
+    .. c.talker.name .. " (" .. tostring(c.talker.model) .. "). An empty line waits for the jobs.\n")
+  local first = opts.prompt
+  while true do
+    local line = first
+    first = nil
+    if line ~= nil then
+      out("> " .. line .. "\n")
+    else
+      out("> ")
+      line = world.line()
+    end
+    if line == nil then break end
+    if line:match("%S") then
+      c:heard(line)
+      drive(function () return not c:busy() end)
+    elseif not wait_for_reports() then
+      out("  (no job is running)\n")
+    end
+  end
+  -- the end of the input: every job finishes and is heard
+  while running() > 0 or #c.reports > 0 do
+    if not wait_for_reports() then break end
+  end
+  out("\n")
+  return codes.answered
+end
+
+-- the main
 
 local REQUIRED_WORLD = { "out", "err", "read" }
-local OPTIONAL_WORLD = { "ports", "doubles", "stdin", "env", "width", "now" }
+local OPTIONAL_WORLD = { "ports", "doubles", "stdin", "env", "width", "now", "line", "sleep" }
 
 local function check_world(world)
   if type(world) ~= "table" then
@@ -1871,6 +2205,8 @@ local function main_body(argv, world)
     return codes.answered
   end
 
+  if opts.history or opts.recall or opts.evidence then return cli.look_back(opts, world) end
+
   local code, second = cli.run(opts, world)
   if code ~= nil then return code end
 
@@ -1880,6 +2216,46 @@ local function main_body(argv, world)
     world.err("  " .. safe(e.lines[i]) .. "\n")
   end
   return e.code
+end
+
+-- --history, --recall, --evidence: what the workspace at --root kept (docs/spec/history.md),
+-- read through the host's history port. Nothing runs and nothing is kept.
+function cli.look_back(opts, world)
+  local history = need_module("history")
+  if not history or type(world.ports) ~= "function" then
+    world.err("pi: this build keeps no history\n")
+    return codes.world
+  end
+  local ok, made, why = pcall(world.ports, { root = opts.root, only = "history" })
+  local hp = ok and type(made) == "table" and made.history or nil
+  if not hp then
+    world.err("pi: this host keeps no history" .. ((why or not ok) and (": " .. safe(tostring(why or made))) or "") .. "\n")
+    return codes.world
+  end
+  local h = history.open(hp)
+  local text, problem
+  if opts.recall then
+    text, problem = history.recall(h, opts.recall)
+  elseif opts.evidence then
+    text, problem = history.evidence(h, opts.evidence, opts.words[1], opts.words[2], true)
+  else
+    local q = {}
+    for _, k in ipairs(HISTORY_FIELDS) do q[k] = opts[k] end
+    local found
+    found, problem = history.find(h, q)
+    if found then
+      local lines = {}
+      for i, r in ipairs(found) do lines[i] = history.line(r) end
+      text = #lines > 0 and table.concat(lines, "\n")
+        or (#h.rows > 0 and "no kept run matches that" or ("no runs are kept at " .. tostring(opts.root)))
+    end
+  end
+  if not text then
+    world.err("pi: " .. safe(tostring(problem)) .. "\n")
+    return codes.usage
+  end
+  world.out((safe(text):gsub("\n?$", "\n")))
+  return codes.answered
 end
 
 -- The whole runner. Never returns nil, never raises for anything in argv, and never

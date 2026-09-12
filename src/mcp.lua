@@ -1,12 +1,9 @@
 -- mcp -- tools that live in another process.
 --
--- A tool in this tree is a Lua body. A tool on a server is a name, a sentence and a
--- schema that arrived over a wire, and the only honest thing to do with it is to make
--- it the same kind of thing before the model ever sees it: by the time `agent.schema`
--- is read there is no way to tell which tools were declared here and which were
--- fetched, because the model's job is not to know.
+-- A server tool is made the same kind of thing as a local one before the model sees it:
+-- by the time `agent.schema` is read, nothing tells which were declared and which fetched.
 --
--- The seam is the same one as everywhere else. A declaration NAMES a server:
+-- A declaration NAMES a server:
 --
 --     agent.uses "github" {
 --       command = { "npx", "-y", "@modelcontextprotocol/server-github" },
@@ -14,23 +11,18 @@
 --       ask     = true,
 --     }
 --
--- and nothing reaches for it: rule 2 holds for a declaration that names a network as
--- firmly as for one that names a file. `mcp.connect` asks, at run time, through the
--- `mcp` port, which owes
+-- and nothing reaches for it (rule 2). `mcp.connect` asks at run time through the `mcp`
+-- port, which owes
 --
 --     list(server, config) -> { descriptor, ... } | nil, err
 --     call(server, tool, args) -> text | result | nil, err
 --
 -- and knows what a transport is so that this module does not. Everything else the
 -- declaration states -- a command line, a URL, headers -- is passed to the port
--- untouched; this module neither reads it nor validates it, because the day it does is
--- the day adding a transport means editing two files.
+-- untouched, neither read nor validated here.
 --
--- A descriptor is either already in the harness's shape (`args`) or carries the JSON
--- Schema a server actually sends (`input_schema` / `inputSchema`), which `mcp.params`
--- converts. Both are here because the first is what a test writes and the second is
--- what a server sends, and a module that only accepts the first has tests that pass
--- against a world that does not exist.
+-- A descriptor is either in the harness's shape (`args`) or carries the JSON Schema a
+-- server sends (`input_schema` / `inputSchema`), which `mcp.params` converts.
 
 local spec = require "spec"
 
@@ -103,11 +95,9 @@ end
 
 -- Ask every declared server what it has, and add what it answers as tools.
 --
--- Returns `added, problems` -- both lists of strings, both always tables. A server that
--- is down is a PROBLEM and not an error: the run continues with the tools it does have,
--- because one unreachable server should not stop an agent that also reads files. A
--- server that answers with something unreadable is the same. What is NOT tolerated is a
--- name collision, which is reported per tool.
+-- Returns `added, problems` -- both lists of strings, both always tables. A server that is
+-- down, or answers unreadably, is a PROBLEM and not an error: the run continues with the
+-- tools it does have. A name collision is not tolerated and is reported per tool.
 --
 -- Idempotent. `a.connected[name]` records what has been asked already, so a host that
 -- calls this on every run does not re-add on the second.

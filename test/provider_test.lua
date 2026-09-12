@@ -139,6 +139,15 @@ function T.a_request_becomes_a_body()
   assert(body.tools == nil)
 end
 
+-- The request's reasoning is OpenAI's `reasoning_effort`, which OpenRouter reads too; with
+-- none declared the body says nothing about it.
+function T.reasoning_becomes_reasoning_effort()
+  local r = ask_for("go")
+  assert(chat.body(r, "m", scheme(), ctx_for()).reasoning_effort == nil)
+  r.reasoning = "low"
+  assert(chat.body(r, "m", scheme(), ctx_for()).reasoning_effort == "low")
+end
+
 function T.a_system_prompt_leads()
   local r = ask_for("go")
   r.system = "you are careful"
@@ -176,6 +185,17 @@ function T.only_required_arguments_are_required()
   assert(#params.required == 1, tostring(#params.required))
   assert(params.required[1] == "path", params.required[1])
   assert(params.properties.text.type == "string")
+end
+
+function T.an_object_argument_is_any_object()
+  -- A host that decodes under the schema would close a bare object and send `{}`.
+  local a = spec.new()
+  spec.add_tool(a, "show", { about = "Show a view", args = { view = spec.types.table "the tree" }, run = function () end })
+  local r = ask_for()
+  r.tools = spec.schema(a)
+  local params = chat.body(r, "m", scheme(), ctx_for()).tools[1]["function"].parameters
+  assert(params.properties.view.type == "object")
+  assert(params.properties.view.additionalProperties == true)
 end
 
 function T.no_empty_collection_reaches_the_wire()
