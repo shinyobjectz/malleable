@@ -1050,10 +1050,12 @@ function behaviour.run(pickles, drivers, opts)
       }
       report.not_evaluable = (report.not_evaluable or 0) + 1
     else
-      local passes, last, kept, seen = 0, nil, {}, {}
+      local passes, last, kept, seen, taken = 0, nil, {}, {}, {}
       for k = 1, samples do
         local one = run_scenario(pickle, drivers, opts)
         last = one
+        -- the cost of every sample, passing or not: a rate says how often, this says how long
+        taken[k] = type(one.result) == "table" and one.result.steps or nil
         if one.outcome == "passed" then
           passes = passes + 1
         elseif #kept < 3 then
@@ -1076,6 +1078,7 @@ function behaviour.run(pickles, drivers, opts)
       last.rate = passes / samples
       last.failures = kept
       last.observations = seen
+      last.taken = taken
       if reads and #reads > 0 then
         last.reads_script = reads
         last.reads_all = (thens or 0) > 0 and #reads == thens

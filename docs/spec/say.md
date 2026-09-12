@@ -155,6 +155,10 @@ with its reason, naming which of the two it was.
 
 ## Corrections, made while building it
 
+* A kit's hooks are said by the kit's line, as its tools and stores are: the modes kit
+  installs two, and the first rendering listed them as unsaid. A kit records how many
+  hooks it put on the agent, and only hooks past those and the limits' own are unsaid.
+
 * The sandboxed surface `cli.load` gives a Lua program has no kit: `agent.files`,
   `agent.shell`, `agent.plan` and `agent.history` are on the prefix only (`agent.lua`), so a
   program run from the command line reaches the workspace through a feature's is lines or

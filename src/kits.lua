@@ -29,7 +29,14 @@ local function record(a, name, told, install)
   local before, stores_before = {}, {}
   for i = 1, #a.order do before[a.order[i]] = true end
   for i = 1, #(a.store_order or {}) do stores_before[a.store_order[i]] = true end
+  local function hook_count()
+    local n = 0
+    for _, list in pairs(a.hooks or {}) do n = n + #list end
+    return n
+  end
+  local hooks_before = hook_count()
   local out = install()
+  told.hooks = hook_count() - hooks_before     -- a kit's hooks are said by the kit's line
   local tools, stores = {}, {}
   for i = 1, #a.order do
     local t = a.order[i]

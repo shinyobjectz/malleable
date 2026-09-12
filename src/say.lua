@@ -246,6 +246,9 @@ local function lines_of(a)
   for _, list in pairs(a.hooks or {}) do hooked = hooked + #list end
   local from_limits = 0
   for _ in pairs(limits) do from_limits = from_limits + 2 end
+  for _, k in pairs(kits) do
+    if type(k) == "table" and type(k.hooks) == "number" then from_limits = from_limits + k.hooks end
+  end
   if hooked > from_limits then
     cannot("%d hook%s (agent.on) watch the run, and a hook is not sayable", hooked - from_limits,
            hooked - from_limits == 1 and "" or "s")

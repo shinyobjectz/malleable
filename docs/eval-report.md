@@ -386,6 +386,17 @@ and a model that writes the tests and the code will make them agree (which is th
 the wall never scores a proposed scenario). Acceptance from outside the program, a
 scripted drive of the CLI with expected output, is the next check to add.
 
+## The author in modes (`evals/author-modes.feature`, 9 scenarios, 3 samples)
+
+The same nine scenarios as the author's, with a briefing that states the workflow, which
+tool, the wall and the edit shapes, and plan mode from `library/modes.lua` (the author
+begins in a reading mode and moves to editing through a tool the person approves). Run
+beside a fresh three-sample run of `evals/author.feature` the same afternoon. The table and
+the reading are in `docs/authoring-context.md`, "The measurement": the wall's four scenarios
+fell from 69 steps to 35 and the gate scenario rose from 1 of 3 to 3 of 3; the three editing
+scenarios rose from 56 steps to 68, one sample over its cap on a scenario-text rewrite loop;
+the total fell from 152 steps to 141.
+
 ## What the evals themselves taught
 
 Four of the seven failures in the first run were the eval's, not the agents': escaped doc
