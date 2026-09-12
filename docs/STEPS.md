@@ -3,7 +3,7 @@
 GENERATED from `src/behaviour.lua` by `lua bin/malleable.lua --steps --heading > docs/STEPS.md`. Never hand-edited: an expression is added in one place, and this is a rendering of it.
 
 ```
-The built-in vocabulary: 89 expressions, version 1; the is phase, version 1.
+The built-in vocabulary: 90 expressions, version 1; the is phase, version 1.
 
 is -- the agent, in the Background
   the agent is called {word}                                 its name  (widens)
@@ -85,6 +85,7 @@ then -- the result
   the call to {word} is refused                              the gate or a hook said no
   the human is asked about {word}                            the gate was put the question
   the human is not asked                                     the gate was put no question at all
+  the human is not asked about {word}                        the gate was put no question about that tool
   it takes {int} step(s)                                     exactly this many passes of the loop
   it takes at most {int} step(s)                             no more passes than this
   the file {string} holds:                                   what the file holds after the run

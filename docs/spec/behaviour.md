@@ -144,6 +144,7 @@ refused. It is the one `When` that reaches no port at all.
 | `it takes at most {int} step(s)` | `result.steps` |
 | `no beat is due` | after `the clock strikes`: nothing ran, every beat held or not yet due |
 | `the answer says {string}`, when the string is a number | the answer holds that number: every number in the answer is read with its thousands separators and a currency sign taken off, and one of them equals it (amended 2026-09-12: at nine samples the notebook answered `$1,200` for a note that said `1200`, and the character check called that a miss three times in eighteen) |
+| `the human is not asked about {word}` | the gate was put no question about that tool (added 2026-09-12 with the line below: under a mode the person is asked about the move, and the outcome that matters is that no proposal was put to them) |
 | `the human is not asked` | the gate was put no question at all (added 2026-09-12: the outcome behind `it never calls propose`, which stated a route and cost the rate when a model tried a tool the harness refused anyway) |
 | `the file {string} holds:` + doc string | the world's `fs`, after |
 | `the file {string} holds the line {string}` | the world's `fs`, after: one line of it, trimmed, exactly (added 2026-09-12 for a file an author edited, too long to state whole) |

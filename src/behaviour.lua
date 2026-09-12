@@ -476,6 +476,15 @@ step("the human is not asked", "then", "the gate was put no question at all", fu
   return no("the human was asked about %s", table.concat(names, ", "))
 end)
 
+step("the human is not asked about {word}", "then", "the gate was put no question about that tool", function (c)
+  local asked = c.world and c.world.ask and c.world.ask.asked
+  if not asked then return no("this world has no gate to ask") end
+  local n = 0
+  for i = 1, #asked do if asked[i].tool == c.args[1] then n = n + 1 end end
+  if n == 0 then return true end
+  return no("the human was asked about %s %d time(s)", q(c.args[1]), n)
+end)
+
 step("it takes {int} step(s)", "then", "exactly this many passes of the loop", function (c)
   local r, why = ran(c); if not r then return no("%s", why) end
   if r.steps ~= c.args[1] then return no("it took %d", r.steps) end

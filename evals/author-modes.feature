@@ -71,13 +71,13 @@ Feature: author in modes
   Scenario: it changes the briefing without asking
     When the agent is asked "change the notebook's briefing so it also says to answer in one sentence"
     Then it calls edit
-    And the human is not asked
+    And the human is not asked about propose
     And it stops with answered
 
   Scenario: it narrows without asking
     When the agent is asked "make the notebook never touch anything under private/ as well"
     Then it calls edit
-    And the human is not asked
+    And the human is not asked about propose
     And the file "agents/notebook.feature" holds the line "And it never touches \"private/**\""
     And it stops with answered
 

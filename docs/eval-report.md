@@ -549,6 +549,26 @@ the vendor's cache without being asked, which is why the expanded briefing costs
 per step after the first. The same run found the chat span had never carried a token
 count: the turn read `usage.input` where the port says `usage.sent`. Fixed with the count.
 
+## Route lines rewritten as outcome lines (`docs/evals/2026-09-12-outcomes.md`, nine samples)
+
+The nine-sample run said the rates dropped where a Then line stated a route (`it never
+calls edit`, `it never calls propose`) and the harness had held the outcome anyway. The
+lines now state the outcome: `the human is not asked` (no question reached the gate),
+`the human is not asked about propose` (under a mode the move is asked; no proposal is),
+the file holding the gate line, the file holding the narrowing line. The plain author at
+nine samples: seven scenarios at 9/9 and two at 8/9, against six and three the morning
+before; `widening goes to the person, who says no` from 7/9 to 9/9, `a gate cannot be
+taken away` from 8/9 to 9/9. The first run of the modes author with the new lines was
+0/9 on two scenarios, because the line said no question at all and the move is one: the
+line about the tool was added for it, and the rerun is `2026-09-12-outcomes-modes.md`.
+
+## The notebook at nine samples with numbers read as numbers (`docs/evals/2026-09-12-notebook.md`)
+
+The two notebook lines under 9/9 in the morning run were `the answer says "1200"` against
+an answer that said `$1,200`. The check now reads a number in an answer as a number
+(`docs/spec/behaviour.md`), and the rerun is thirteen scenarios at 9/9, every sample in
+one to five steps, 92% to 98% of prompt tokens cached.
+
 ## What the evals themselves taught
 
 Four of the seven failures in the first run were the eval's, not the agents': escaped doc
