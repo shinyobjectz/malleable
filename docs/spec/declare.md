@@ -341,7 +341,7 @@ folder, reached through its `fs` port (`src/authoring.lua`):
 | --- | --- | --- |
 | `features` | lists the feature files under the folder | no |
 | `feature` | reads one, with line numbers | no |
-| `vocabulary` | every line a file may hold, by phase and reach, and one file's shorthands | no |
+| `vocabulary` | every line a file may hold, by phase and reach, and one file's shorthands; with `phase` (is, given, when, then), only that phase's lines (added 2026-09-12: a model choosing an is line reads about half of the whole, 4.9 KB of 9.8) | no |
 | `verify` | runs one file's scenarios on the doubles; authored and proposed counted apart | no |
 | `edit` | one edit that widens nothing, scored, then written | no |
 | `propose` | one edit that widens reach, or `create`, a new agent, scored, then written | **yes** |

@@ -391,7 +391,9 @@ local VOCAB_HEADS = {
   { "then", "what must hold of the result" },
 }
 
-local function vocabulary_text(shorthands)
+local VOCAB_PHASES = { is = true, given = true, when = true, ["then"] = true }
+
+local function vocabulary_text(shorthands, phase)
   local out = {}
   local by = { is = declare.vocabulary() }
   for _, st in ipairs(behaviour.steps()) do
@@ -400,11 +402,15 @@ local function vocabulary_text(shorthands)
     list[#list + 1] = st
   end
   for _, h in ipairs(VOCAB_HEADS) do
+    -- one phase on request: a model choosing an is line reads half of the whole
+    -- (docs/confidence-plan.md, item 4)
+    if phase and h[1] ~= phase then goto skip end
     out[#out + 1] = h[1] .. " -- " .. h[2]
     for _, st in ipairs(by[h[1]] or {}) do
       local tag = st.reach and st.reach ~= "neither" and ("  [" .. st.reach .. (st.gate and ", a gate" or "") .. "]") or ""
       out[#out + 1] = string.format("  %-62s %s%s", st.expr, st.about or "", tag)
     end
+    ::skip::
   end
   if shorthands and #shorthands > 0 then
     out[#out + 1] = "shorthands -- this file's own"
@@ -481,10 +487,16 @@ function authoring.install(a, s, opts)
 
   s.tool "vocabulary" {
     about = "Every line a feature file may hold, by phase, and which way each is line moves what the "
-      .. "agent can reach. With a path, that file's shorthands too.",
-    args = { path = s.string_opt "a feature file whose shorthands to list" },
+      .. "agent can reach. With a path, that file's shorthands too. With a phase (is, given, when, "
+      .. "then), only that phase's lines.",
+    args = { path = s.string_opt "a feature file whose shorthands to list",
+             phase = s.string_opt "one of is, given, when, then: list only that phase" },
     run = function (c)
       local shorthands = nil
+      local phase = c.args.phase
+      if phase ~= nil and not VOCAB_PHASES[phase] then
+        return nil, "phase is one of is, given, when, then; not " .. tostring(phase)
+      end
       if c.args.path then
         local full, why = resolve(folder, c.args.path, nil)
         if not full then return nil, why end
@@ -495,7 +507,7 @@ function authoring.install(a, s, opts)
           shorthands = list
         end
       end
-      return vocabulary_text(shorthands)
+      return vocabulary_text(shorthands, phase)
     end,
   }
 

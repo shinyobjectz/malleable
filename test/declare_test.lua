@@ -553,4 +553,24 @@ function T.the_wall_features_verify_on_the_doubles()
   end
 end
 
+
+function T.the_vocabulary_answers_one_phase_on_request()
+  -- docs/confidence-plan.md, item 4: a model choosing an is line reads a third of the whole
+  local b = agent.new()
+  b.declare(feature('    Given the agent is called b\n    And its model is "x:y"\n    And it edits agents in "agents"\n'))
+  local w = agent.world { model = {
+    { tool = "vocabulary", args = {} },
+    { tool = "vocabulary", args = { phase = "is" } },
+    { tool = "vocabulary", args = { phase = "sideways" } },
+    { text = "done" } } }
+  local r = b.run("go", w)
+  local whole, is_only, bad = r.calls[1].output, r.calls[2].output, r.calls[3].output
+  assert(contains(whole, "then -- ") and contains(whole, "is -- "), whole:sub(1, 200))
+  assert(contains(is_only, "is -- ") and not contains(is_only, "then -- ") and not contains(is_only, "given -- "), is_only:sub(1, 200))
+  assert(contains(is_only, "it starts in the mode") or contains(is_only, "asks first"), "the is lines are there")
+  assert(#is_only < #whole * 0.6, #is_only .. " of " .. #whole)   -- the is lines are half the whole
+  assert(contains(is_only, "Every line of a Background"), "the grammar sentence stays")
+  assert(r.calls[3].ok == false and contains(bad, "one of is, given, when, then"), tostring(bad))
+end
+
 return T
