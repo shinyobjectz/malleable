@@ -143,6 +143,8 @@ refused. It is the one `When` that reaches no port at all.
 | `it takes {int} step(s)` | `result.steps` |
 | `it takes at most {int} step(s)` | `result.steps` |
 | `no beat is due` | after `the clock strikes`: nothing ran, every beat held or not yet due |
+| `the answer says {string}`, when the string is a number | the answer holds that number: every number in the answer is read with its thousands separators and a currency sign taken off, and one of them equals it (amended 2026-09-12: at nine samples the notebook answered `$1,200` for a note that said `1200`, and the character check called that a miss three times in eighteen) |
+| `the human is not asked` | the gate was put no question at all (added 2026-09-12: the outcome behind `it never calls propose`, which stated a route and cost the rate when a model tried a tool the harness refused anyway) |
 | `the file {string} holds:` + doc string | the world's `fs`, after |
 | `the file {string} holds the line {string}` | the world's `fs`, after: one line of it, trimmed, exactly (added 2026-09-12 for a file an author edited, too long to state whole) |
 | `nothing is written` | the world's `fs`, after |
@@ -427,6 +429,11 @@ sample, the tool, the sentence the model read (240 characters), the argument nam
 from and a step count only counts it; the sentences, grouped, are the work list for the
 cost of an edit (`docs/confidence-plan.md`, item 4), and `scripts/eval.lua` prints them
 grouped under each scenario with how many samples drew each.
+
+The scenario also carries `usage`, the model port's counts summed over the samples
+(`sent`, `back`, `cached`; `spec/turn.md`), nil when no run reported any; the eval prints
+the cache hit rate, `cached / sent`, beside the steps, so a report says whether the stable
+prefix every step sends is in fact served from the vendor's cache.
 
 Beside every rate, its 95% Wilson interval (`behaviour.interval(passes, samples)`, kept on
 the scenario as `interval`; added 2026-09-12, `docs/confidence-plan.md` item 1): `3/3`

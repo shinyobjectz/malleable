@@ -132,7 +132,7 @@ port implementation's job, not the harness's.
 
 `reply` is:
 
-    { text = "…", calls = { call, ... }, stop = "done", usage = { sent = 812, back = 44 } }
+    { text = "…", calls = { call, ... }, stop = "done", usage = { sent = 812, back = 44, cached = 700 } }
 
 `calls` is always a list, empty when the model asked for nothing. `stop` is one of
 `"done"` (it finished), `"calls"` (it wants tools run), `"cut"` (it hit the far side's

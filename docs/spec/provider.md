@@ -337,7 +337,16 @@ readily as it wants to say the word nobody recognised.
 
 A reply may carry both text and calls; both are returned, and `stop` is `"calls"`.
 `usage.prompt_tokens` and `usage.completion_tokens` become `usage.sent` and
-`usage.back`.
+`usage.back`; `usage.prompt_tokens_details.cached_tokens`, when the API reports it,
+becomes `usage.cached` (added 2026-09-12): the part of `sent` the vendor served from its
+prompt cache. OpenRouter reports it for every model whose provider caches, and most cache
+a byte-identical prefix on their own; the number is how a run knows whether the system
+message and the tool list it sends unchanged every step are in fact being cached. Measured
+2026-09-12 on the notebook, two samples of three steps in one process: GLM 5.3 flash 76%
+of the prompt tokens cached, GLM 5.3 64%, the first step of a process 0%. No cache mark is
+sent, and none is needed for these; an explicit `cache_control` mark is what OpenRouter
+forwards to Anthropic and Gemini models only, and would be a one-line addition to
+`openai_chat.lua` on the system message the day one is used.
 
 `stop = "cut"` with tool calls is returned as it arrived, calls and all. Truncated
 arguments are the turn loop's to refuse; provider does not silently drop what the API

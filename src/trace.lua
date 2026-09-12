@@ -49,6 +49,7 @@ trace.MINTED = {
   ["malleable.budget"]      = "number",
   ["malleable.calls"]       = "number",
   ["malleable.tools"]       = "number",
+  ["malleable.cached_tokens"] = "number",
   ["malleable.skills"]      = "number",
   -- A SET: one or more terms, sorted and comma-joined. A shell call that pipes `curl`
   -- into `jq` reached out and read, and answering only one of them would be picking which

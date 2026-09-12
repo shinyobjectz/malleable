@@ -152,7 +152,7 @@ end
 
 function T.the_vocabulary_is_closed_and_every_expression_compiles_once()
   local steps = behaviour.steps()
-  assert(#steps == 47, #steps .. " expressions")   -- 47 since `the file holds the line` (2026-09-12)
+  assert(#steps == 48, #steps .. " expressions")   -- 48 since `the human is not asked` (2026-09-12)
   local skeletons, n = behaviour.skeletons(), 0
   for _ in pairs(skeletons) do n = n + 1 end
   -- One skeleton each: two built-ins that read the same line would make every scenario
@@ -160,7 +160,7 @@ function T.the_vocabulary_is_closed_and_every_expression_compiles_once()
   assert(n == #steps, n .. " skeletons for " .. #steps .. " expressions")
   local phases = { given = 0, when = 0, ["then"] = 0 }
   for i = 1, #steps do phases[steps[i].phase] = phases[steps[i].phase] + 1 end
-  assert(phases.given == 16 and phases.when == 3 and phases["then"] == 28,
+  assert(phases.given == 16 and phases.when == 3 and phases["then"] == 29,
          string.format("%d/%d/%d", phases.given, phases.when, phases["then"]))
 end
 
@@ -735,6 +735,26 @@ function T.a_rate_carries_its_interval_and_the_report_prints_it()
   assert(lo == 0 and hi == 1)
   local text = behaviour.report({ passed = 1, failed = 0, undefined = 0, broken = 0, skipped = 0, scenarios = { { name = "x", line = 1, outcome = "passed", samples = 10, passes = 9, rate = 0.9, steps = {} } } })
   assert(text:find("9/10 (0.60-0.98)", 1, true), text)
+end
+
+
+function T.a_number_in_an_answer_is_read_as_a_number()
+  local a = declared()
+  local pickles = assert(gherkin.pickle(FEATURE .. [[
+  Scenario: money
+    Given the model answers "The venue is $1,200 and catering $800."
+    When the agent is asked "budget?"
+    Then the answer says "1200"
+    And the answer says "800"
+]] .. [[
+  Scenario: not that number
+    Given the model answers "The venue is $1,200."
+    When the agent is asked "budget?"
+    Then the answer says "120"
+]]))
+  local r = behaviour.run(pickles, drivers(a))
+  assert(r.scenarios[1].outcome == "passed", r.scenarios[1].steps[3].why or r.scenarios[1].steps[4].why or "?")
+  assert(r.scenarios[2].outcome == "failed", "120 is not in $1,200")
 end
 
 return T

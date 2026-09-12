@@ -197,9 +197,11 @@ local function read_usage(u)
   if type(u) ~= "table" then return nil end
   local sent = type(u.prompt_tokens) == "number" and u.prompt_tokens or nil
   local back = type(u.completion_tokens) == "number" and u.completion_tokens or nil
+  local details = type(u.prompt_tokens_details) == "table" and u.prompt_tokens_details or nil
+  local cached = details and type(details.cached_tokens) == "number" and details.cached_tokens or nil
   -- nil means unmeasured. Zeros would read as a measurement.
   if sent == nil and back == nil then return nil end
-  return { sent = sent, back = back }
+  return { sent = sent, back = back, cached = cached }
 end
 
 -- A model mistake is not a call failure: an argument string the model wrote badly

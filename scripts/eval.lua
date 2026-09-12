@@ -107,6 +107,10 @@ for _, sc in ipairs(report.scenarios) do
     for k = 1, #sc.taken do parts[k] = tostring(sc.taken[k] or "?") end
     line = line .. "  steps " .. table.concat(parts, " ")
   end
+  if sc.usage and (sc.usage.sent or 0) > 0 then
+    line = line .. string.format("  tokens %d sent, %d back, %d%% cached", sc.usage.sent, sc.usage.back,
+      math.floor(100 * sc.usage.cached / sc.usage.sent + 0.5))
+  end
   io.write(line, "\n")
   -- the Then lines whose passing needs the script this eval dropped (docs/spec/behaviour.md)
   for _, r in ipairs(sc.reads_script or {}) do
@@ -128,7 +132,7 @@ for _, sc in ipairs(report.scenarios) do
     io.write(string.format("    ! %s%s x%d in %d sample(s): %s\n", g.tool, g.op and (" " .. g.op) or "", g.count, n, g.why:sub(1, 160)))
     refusals[#refusals + 1] = { tool = g.tool, op = g.op, why = g.why, failed = g.failed, count = g.count, in_samples = n }
   end
-  local entry = { name = sc.name, passes = sc.passes, samples = sc.samples, outcome = sc.outcome, failures = {}, steps = sc.taken, refusals = refusals }
+  local entry = { name = sc.name, passes = sc.passes, samples = sc.samples, outcome = sc.outcome, failures = {}, steps = sc.taken, refusals = refusals, usage = sc.usage }
   for _, f in ipairs(sc.failures or {}) do
     local step
     for _, st in ipairs(f.steps or {}) do if st.why and st.outcome ~= "skipped" then step = st; break end end

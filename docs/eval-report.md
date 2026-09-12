@@ -532,6 +532,23 @@ that a briefing is changed with `doc`), `a replace says what goes in, as with` (
 `already says ...; there is nothing to add` (7, a retry after a success). The scenario
 edit is still the 7/9, in 6 to 12 steps, and the per-op examples did not move it.
 
+## The prompt cache, measured (2026-09-12)
+
+The provider now reads OpenRouter's cached-token count into `usage.cached`, the turn sums
+it onto the result and the chat span, and the eval prints `cached / sent` beside the
+steps. The notebook, two samples of three steps in one process, no cache mark sent:
+
+| model | prompt tokens sent | cached |
+| --- | --- | --- |
+| GLM 5.3 flash | 6 640 | 76% |
+| GLM 5.3 | 6 640 | 64% |
+| either, the first step of a process | 3 277 | 0% |
+
+The stable prefix every step sends, the system message and the tool list, is served from
+the vendor's cache without being asked, which is why the expanded briefing costs nothing
+per step after the first. The same run found the chat span had never carried a token
+count: the turn read `usage.input` where the port says `usage.sent`. Fixed with the count.
+
 ## What the evals themselves taught
 
 Four of the seven failures in the first run were the eval's, not the agents': escaped doc

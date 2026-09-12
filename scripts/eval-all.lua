@@ -106,6 +106,10 @@ for _, p in ipairs(parts) do
       s.passes = s.passes + (sc.passes or 0)
       s.samples = s.samples + (sc.samples or 0)
       for _, st in ipairs(sc.steps or {}) do s.steps[#s.steps + 1] = st end
+      if type(sc.usage) == "table" then
+        s.usage = s.usage or { sent = 0, back = 0, cached = 0 }
+        s.usage.sent = s.usage.sent + (sc.usage.sent or 0); s.usage.back = s.usage.back + (sc.usage.back or 0); s.usage.cached = s.usage.cached + (sc.usage.cached or 0)
+      end
       for _, f in ipairs(sc.failures or {}) do s.failures[#s.failures + 1] = f end
       s.refusals = s.refusals or {}
       for _, r in ipairs(sc.refusals or {}) do
@@ -133,16 +137,18 @@ for _, key in ipairs(order) do
   w("## `evals/%s` on `%s`", m.file, m.model ~= "" and m.model or "the model the file names")
   w("")
   for _, fault in ipairs(m.faults) do w("A batch gave no report: %s", fault); w("") end
-  w("| scenario | passes | interval | steps |")
-  w("| --- | --- | --- | --- |")
+  w("| scenario | passes | interval | steps | tokens sent | cached |")
+  w("| --- | --- | --- | --- | --- | --- |")
   local run = { file = m.file, model = m.model, scenarios = {} }
   for _, name in ipairs(m.names) do
     local s = m.scenarios[name]
     local lo, hi = behaviour.interval(s.passes, s.samples)
     local steps = {}
     for k = 1, #s.steps do steps[k] = tostring(s.steps[k]) end
-    w("| %s | %d/%d | %.2f-%.2f | %s |", name, s.passes, s.samples, lo, hi, table.concat(steps, " "))
-    run.scenarios[#run.scenarios + 1] = { name = name, passes = s.passes, samples = s.samples, lo = lo, hi = hi, steps = s.steps, failures = s.failures }
+    local u = s.usage
+    w("| %s | %d/%d | %.2f-%.2f | %s | %s | %s |", name, s.passes, s.samples, lo, hi, table.concat(steps, " "),
+      u and tostring(u.sent) or "", u and u.sent > 0 and string.format("%d%%", math.floor(100 * u.cached / u.sent + 0.5)) or "")
+    run.scenarios[#run.scenarios + 1] = { name = name, passes = s.passes, samples = s.samples, lo = lo, hi = hi, steps = s.steps, failures = s.failures, usage = s.usage }
   end
   w("")
   for _, name in ipairs(m.names) do

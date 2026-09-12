@@ -980,8 +980,21 @@ function turn.run(agent, prompt, port, opts)
     do
       local attrs = {}
       if type(reply) == "table" and type(reply.usage) == "table" then
-        if type(reply.usage.input) == "number" then attrs["gen_ai.usage.input_tokens"] = reply.usage.input end
-        if type(reply.usage.output) == "number" then attrs["gen_ai.usage.output_tokens"] = reply.usage.output end
+        -- the port's words are sent/back/cached (spec/port.md); input/output are read too,
+        -- because the first draft here read only those and the span never carried a count
+        local u = reply.usage
+        local sent = type(u.sent) == "number" and u.sent or (type(u.input) == "number" and u.input or nil)
+        local back = type(u.back) == "number" and u.back or (type(u.output) == "number" and u.output or nil)
+        local cached = type(u.cached) == "number" and u.cached or nil
+        if sent then attrs["gen_ai.usage.input_tokens"] = sent end
+        if back then attrs["gen_ai.usage.output_tokens"] = back end
+        if cached then attrs["malleable.cached_tokens"] = cached end
+        if sent or back or cached then
+          result.usage = result.usage or { sent = 0, back = 0, cached = 0 }
+          result.usage.sent = result.usage.sent + (sent or 0)
+          result.usage.back = result.usage.back + (back or 0)
+          result.usage.cached = result.usage.cached + (cached or 0)
+        end
       end
       if type(reply) == "table" and type(reply.calls) == "table" then
         attrs["malleable.calls"] = #reply.calls

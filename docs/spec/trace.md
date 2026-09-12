@@ -206,6 +206,7 @@ repo ontology, each names a closed set or a number, and there is no free-text on
 | `malleable.act` | what a tool call DID, from the closed set in `spec/command.md`, sorted and comma-joined |
 | `malleable.unplaced` | simple commands in this call the vocabulary could not name |
 | `malleable.tools` | tools a server offered and this run took |
+| `malleable.cached_tokens` | prompt tokens the vendor served from its cache on this chat span, when it said (2026-09-12) |
 | `malleable.skills` | skills the workspace and the declaration hold between them |
 | `malleable.notes` | notes the run made |
 | `malleable.depth` | 0 for a run a person asked for, 1 for a delegate's child, and so on |

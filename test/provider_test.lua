@@ -393,6 +393,11 @@ function T.usage_absent_is_nil()
   })
   assert(counted.usage.sent == 812)
   assert(counted.usage.back == 44)
+  assert(counted.usage.cached == nil, "no details, no cached count")
+  local hit = assert(one_call {
+    completion(said("hi"), { usage = { prompt_tokens = 812, completion_tokens = 44, prompt_tokens_details = { cached_tokens = 700 } } }),
+  })
+  assert(hit.usage.cached == 700, tostring(hit.usage.cached))
   assert(counted.served_model == "served/x")
 end
 

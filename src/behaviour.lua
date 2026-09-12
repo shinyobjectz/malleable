@@ -356,9 +356,22 @@ step("it answers {string}", "then", "the answer, exactly", function (c)
   end
 end)
 
+-- A number in an answer is read as a number: "$1,200" says 1200. The check is a reading
+-- of the answer's numbers, not of its characters (spec/behaviour.md, the then table).
+local function says_number(answer, want)
+  local n = tonumber(want)
+  if not n or type(answer) ~= "string" then return false end
+  for group in answer:gmatch("%d[%d,]*%.?%d*") do
+    local v = tonumber((group:gsub(",", "")))
+    if v == n then return true end
+  end
+  return false
+end
+
 step("the answer says {string}", "then", "the answer, containing", function (c)
   local r, why = ran(c); if not r then return no("%s", why) end
-  if not contains(r.answer, c.args[1]) then return no("it answered %s", q(r.answer)) end
+  if contains(r.answer, c.args[1]) or says_number(r.answer, c.args[1]) then return true end
+  return no("it answered %s", q(r.answer))
 end)
 
 step("it calls {word}", "then", "the tool was called at least once", function (c)
@@ -452,6 +465,15 @@ step("the human is asked about {word}", "then", "the gate was put the question",
   for i = 1, #asked do if asked[i].tool == c.args[1] then return true end end
   return no("the human was asked about nothing" ..
             (#asked > 0 and (" but " .. q(asked[1].tool)) or ""))
+end)
+
+step("the human is not asked", "then", "the gate was put no question at all", function (c)
+  local asked = c.world and c.world.ask and c.world.ask.asked
+  if not asked then return no("this world has no gate to ask") end
+  if #asked == 0 then return true end
+  local names = {}
+  for i = 1, #asked do names[#names + 1] = tostring(asked[i].tool) end
+  return no("the human was asked about %s", table.concat(names, ", "))
 end)
 
 step("it takes {int} step(s)", "then", "exactly this many passes of the loop", function (c)
@@ -1064,12 +1086,19 @@ function behaviour.run(pickles, drivers, opts)
       }
       report.not_evaluable = (report.not_evaluable or 0) + 1
     else
-      local passes, last, kept, seen, taken, refusals = 0, nil, {}, {}, {}, {}
+      local passes, last, kept, seen, taken, refusals, usage = 0, nil, {}, {}, {}, {}, nil
       for k = 1, samples do
         local one = run_scenario(pickle, drivers, opts)
         last = one
         -- the cost of every sample, passing or not: a rate says how often, this says how long
         taken[k] = type(one.result) == "table" and one.result.steps or nil
+        -- and what the model port counted, summed over the samples: prompt tokens sent,
+        -- completion tokens back, and the prompt tokens the vendor served from its cache
+        local u = type(one.result) == "table" and one.result.usage or nil
+        if type(u) == "table" then
+          usage = usage or { sent = 0, back = 0, cached = 0 }
+          usage.sent = usage.sent + (u.sent or 0); usage.back = usage.back + (u.back or 0); usage.cached = usage.cached + (u.cached or 0)
+        end
         -- and every call a sample had refused or failed, passing or not: the sentence the
         -- model read and the call that drew it, which is the work list for the cost of an
         -- edit (docs/confidence-plan.md, item 4). A rate hides them; a step count only counts them.
@@ -1108,6 +1137,7 @@ function behaviour.run(pickles, drivers, opts)
       last.observations = seen
       last.taken = taken
       last.refusals = refusals
+      last.usage = usage
       if reads and #reads > 0 then
         last.reads_script = reads
         last.reads_all = (thens or 0) > 0 and #reads == thens

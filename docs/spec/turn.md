@@ -128,8 +128,15 @@ does nothing is the worst kind of bug in a thing whose job is to always terminat
   calls   = { record, ... },  -- flat, in dispatch order, across all steps
   err     = { where = string, message = string } | nil,  -- set iff stop == "error"
   notes   = { string, ... },  -- non-fatal oddities: hook errors, out-of-contract ports
+  usage   = { sent = n, back = n, cached = n } | nil,  -- summed over the steps; nil when no step reported any
 }
 ```
+
+`usage` (added 2026-09-12) is the sum of what the model port reported on each step, in the
+port's own words: `sent` prompt tokens, `back` completion tokens, `cached` the prompt
+tokens the vendor served from its cache. A step that reported nothing adds nothing; a run
+in which no step reported anything has `usage = nil`, never zeros. The chat span carries
+each step's own numbers (`spec/trace.md`).
 
 `stop` is the field to branch on and it is one of exactly four strings, forever. `reason`
 is for a human and may be reworded between versions; do not match on it.
