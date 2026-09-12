@@ -176,6 +176,15 @@ and the lines above other than a body may still be said of it.
 | `the beat {word} comes every day at {string} and asks {string}` | `agent.every`, at a clock time |
 | `the beat {word} runs once per {word}` | `once_per`: hour, day, week, ever |
 
+### its own kits
+
+| | declares |
+| --- | --- |
+| `it uses the kit {string}` | loads the kit file at that path; its lines join the is vocabulary for the process (`docs/spec/kit.md`) |
+
+A kit's own lines are read after every kit line in the Background, whatever their order,
+and carry the reach the kit gave them. Added 2026-09-12.
+
 ### its own steps
 
 | | declares |
@@ -187,7 +196,8 @@ and shorthands, below, which need no Lua at all.
 
 ### What the Gherkin cannot say, and why
 
-`declare.UNSAID` lists it, and today it holds one entry: `agent.on`. A hook is code that
+`declare.UNSAID` lists it, and today it holds one entry: `agent.on`. The other direction,
+a declaration said back as its Background with the unsaid named, is `docs/spec/say.md`. A hook is code that
 watches a run, and the one thing a hook does to a run, refusing a call, is
 `the tool {word} may be called at most {int} time(s)`. Every is expression names the entry
 point it `covers`, and `test/declare_test.lua` fails when a key of `cli.surface` or a

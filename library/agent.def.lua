@@ -267,6 +267,11 @@ function agent.shell(cfg) end
 function agent.plan(cfg) end
 --- history, recall and evidence: the tools that read the runs the world has kept.
 function agent.history() end
+--- A kit of the workspace's own (docs/spec/kit.md): its table, loaded for the process, and
+--- installed on this agent with `told`, what its lines would have said.
+---@param def table
+---@param told table|nil
+function agent.kit(def, told) end
 
 ---@param name string
 ---@param cfg table|nil

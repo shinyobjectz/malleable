@@ -200,6 +200,26 @@ Gherkin; let the author agent propose changes to the Gherkin under the wall; let
 runner verify the Gherkin against the Lua on every change; and let a real-model eval of
 the same file, with its script-shaped scenarios set aside, be the number.
 
+## What was built from this, the same day
+
+* **The runner labels Then lines that read the script** (`docs/spec/behaviour.md`, "Then
+  lines that read the script"): a value only a dropped model line says, or a count that is
+  the script's, is named under the rate in the eval report, with both line numbers. The
+  scenario is still scored; `@verify-only` still decides. Item 1 above.
+* **`--say`** renders any declaration, Lua or feature, as the Background that would declare
+  it, and names the unsaid (`docs/spec/say.md`). **`--conforms`** holds a program to a
+  contract and exits 3 on drift, in vocabulary words. The two mechanisms proposed above.
+* **Kits** are a written contract (`docs/spec/kit.md`): one Lua file with is lines and their
+  reach, an install, steps and a say-back; `it uses the kit "path"` loads it and the wall
+  scores its lines by the reach it declared. `showcase/20-kits.feature` uses one. Move 1
+  above; the built-in kits stay in `src/` for now and record themselves the same way.
+
+Found while building them: the sandboxed surface a Lua program gets from the command line
+has no kit at all (`agent.files`, `agent.shell`, `agent.plan`, `agent.history` are on the
+prefix only), so a `.lua` run by `bin/malleable.lua` reaches the workspace through a
+feature's is lines or not at all. That belongs on the list above as a tenth caveat of the
+Lua side.
+
 ## What the real model said about the showcase
 
 Nine of the nineteen files, three samples a scenario, GLM 5.3 standing in for

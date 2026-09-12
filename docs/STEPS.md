@@ -3,7 +3,7 @@
 GENERATED from `src/behaviour.lua` by `lua bin/malleable.lua --steps --heading > docs/STEPS.md`. Never hand-edited: an expression is added in one place, and this is a rendering of it.
 
 ```
-The built-in vocabulary: 85 expressions, version 1; the is phase, version 1.
+The built-in vocabulary: 86 expressions, version 1; the is phase, version 1.
 
 is -- the agent, in the Background
   the agent is called {word}                                 its name  (widens)
@@ -45,6 +45,7 @@ is -- the agent, in the Background
   the step {string} sets up:                                 a step whose body writes the world, in Lua
   the step {string} checks:                                  a step whose body reads the result, in Lua
   it edits agents in {string}                                the six authoring tools, over the feature files in that folder  (widens)
+  it uses the kit {string}                                   loads a kit file beside this one; its lines join the vocabulary  (widens)
 
 given -- the world
   the file {string} contains:                                a file the agent can read

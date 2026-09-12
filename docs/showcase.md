@@ -1,6 +1,7 @@
 # The Gherkin agent DSL, shown one dimension at a time
 
-`showcase/` holds one feature file a dimension of the language an agent is written in.
+`showcase/` holds one feature file a dimension of the language an agent is written in
+(and `showcase/kits/`, the kit the twentieth loads).
 Each file is a complete agent and the scenarios that prove the dimension does what the
 spec says, on the doubles (`luajit scripts/showcase.lua`, and `test/showcase_test.lua`
 keeps them honest in the suite). Nine of them are also run against the real model
@@ -29,8 +30,9 @@ the same Then lines are the checks. Ticket mar-nbpt.
 | 15, 18 refused at load | a tool with no body; a budget of zero | a wrong Background is refused before any scenario, with the line and the sentence |
 | 16 trust none, 17 trust trusted | `its trust is` | none puts every gated tool to the person; trusted asks nothing; a deny holds either way |
 | 19 sandbox | a Lua body that reaches for `io` | it fails by name when it runs, as a result, and the run goes on |
+| 20 kits | `it uses the kit "kits/calendar.lua"`: a kit of the workspace's own, its two lines (one widening, one narrowing), its store and tools, its own given and then steps | the kit's lines are vocabulary once loaded, whatever their order; its tool writes its store; its own line reads it back; the narrowing line holds (`docs/spec/kit.md`) |
 
-Nineteen files, fifty-five scenarios, all passing on the doubles.
+Twenty files, fifty-seven scenarios, all passing on the doubles.
 
 ## What writing them found
 
