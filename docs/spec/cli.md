@@ -55,6 +55,8 @@ is joined with single spaces and becomes the prompt, unless `--prompt` was given
 | `--script` | path | none | a Lua data file of scripted replies for `--dry-run`. |
 | `--check` | — | off | load, validate, report, run nothing. |
 | `--tools` | — | off | print the tool schema the model would be sent, run nothing. |
+| `--say` | — | off | print the declaration said back as the Background that would declare it, and what no line says; run nothing (`docs/spec/say.md`). |
+| `--conforms` | path | none | load that path too and report every line only one of the two says; exit 0 when they say the same agent, 3 when not (`docs/spec/say.md`). |
 | `--session` | path | none | save the transcript as one session record when the run ends. |
 | `--json` | — | off | print one JSON object on stdout; all human text goes to stderr. |
 | `--show-lines` | integer ≥ 0 | 12 | lines of a tool result to render. `0` shows none. |
@@ -104,8 +106,8 @@ mapping is total. Nothing here ever returns a code above 7: a shell reports a si
 process as 128 plus the signal, and a runner that returned 130 for its own reasons
 would make a real interrupt unreadable.
 
-`--check` exits 3 when the declaration has problems and 0 when it does not. `--json`
-does not change any exit code.
+`--check` exits 3 when the declaration has problems and 0 when it does not, and so does
+`--conforms` when the two declarations differ. `--json` does not change any exit code.
 
 ## The world it takes
 

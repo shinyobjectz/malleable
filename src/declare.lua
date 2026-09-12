@@ -174,6 +174,7 @@ local function new_plan()
     stores = {}, store_order = {}, skills = {}, skill_order = {},
     beats = {}, beat_order = {}, servers = {}, server_order = {},
     steps = {}, delegates = {}, allow = {}, deny = {}, never = {},
+    kits = {}, kit_order = {}, kit_files = {},
   }
 end
 
@@ -398,14 +399,38 @@ local IS = {
   { expr = "it edits agents in {string}", covers = "authoring", about = "the six authoring tools, over the feature files in that folder",
     reach = "widens",
     apply = function (p, s, folder) once(p, "authoring", folder, s.line, "the authoring folder") end },
+
+  -- a workspace's own kit (docs/spec/kit.md): loaded before the other lines are read, so
+  -- its lines are vocabulary whatever their order in the Background
+  { expr = "it uses the kit {string}", covers = "kit", about = "loads a kit file beside this one; its lines join the vocabulary",
+    reach = "widens",
+    apply = function (p, s, path) p.kit_files[#p.kit_files + 1] = { path = path, line = s.line } end },
 }
+local KIT_LINE = "it uses the kit {string}"
+
+-- A registered kit's line, as an is line: applying it records what it told the kit on the
+-- plan, and the text, so the kit is installed once at build and said back verbatim.
+local function kit_entry(name, e)
+  return { expr = e.expr, covers = "kit", about = e.about .. " (the kit " .. name .. ")", reach = e.reach, kit = name,
+    apply = function (p, s, ...)
+      local k = p.kits[name]
+      if not k then
+        k = { told = {}, lines = {}, line = s.line }
+        p.kits[name] = k
+        p.kit_order[#p.kit_order + 1] = name
+      end
+      k.lines[#k.lines + 1] = s.text
+      local ok, err = pcall(e.tells, k.told, ...)
+      if not ok then refuse(s.line, "the kit %s: %s", name, tostring(err)) end
+    end }
+end
 
 -- Compiled once. An is expression that does not compile, or that could be read as a
 -- built-in step, is a bug in this file and raises here rather than in someone's feature.
-local COMPILED, BUILT_INS
+local COMPILED, BUILT_INS, COMPILED_AT
 local function compiled()
-  if COMPILED then return COMPILED, BUILT_INS end
-  COMPILED, BUILT_INS = {}, {}
+  if COMPILED and COMPILED_AT == kits.version then return COMPILED, BUILT_INS end
+  COMPILED, BUILT_INS, COMPILED_AT = {}, {}, kits.version
   local skeletons = behaviour.skeletons()
   for i = 1, #IS do
     local e, why = gherkin.expr(IS[i].expr)
@@ -414,6 +439,11 @@ local function compiled()
       error("declare: the is expression " .. q(IS[i].expr) .. " collides with the built-in " .. q(skeletons[e.skeleton()]))
     end
     COMPILED[i] = { expr = e, def = IS[i] }
+  end
+  -- the loaded kits' lines, after the built-in ones, in the order they were loaded
+  for _, name in ipairs(kits.order) do
+    local k = kits.registered[name]
+    for i = 1, #k.is do COMPILED[#COMPILED + 1] = { expr = k.is[i].expr, def = kit_entry(name, k.is[i].def) } end
   end
   local steps = behaviour.steps()
   for i = 1, #steps do
@@ -480,7 +510,110 @@ function declare.vocabulary()
     out[i] = { expr = IS[i].expr, phase = "is", about = IS[i].about, reach = IS[i].reach,
                gate = IS[i].gate or nil, covers = IS[i].covers }
   end
+  for _, name in ipairs(kits.order) do
+    for _, e in ipairs(kits.registered[name].is) do
+      out[#out + 1] = { expr = e.def.expr, phase = "is", about = e.def.about .. " (the kit " .. name .. ")",
+                        reach = e.def.reach, covers = "kit", kit = name }
+    end
+  end
   return out
+end
+
+-- ------------------------------------------------------------------ kits (docs/spec/kit.md)
+
+--- Load a kit for the process: check its shape, compile its lines against the vocabulary,
+--- refuse a collision by name, and register it. Answers the kit's name, or `nil, sentence`.
+--- `from` is the file it came from, when it did; loading the same file again is nothing.
+function declare.kit(def, from)
+  local ok, why = kits.define(def)
+  if not ok then return nil, why end
+  local have = kits.registered[def.name]
+  if have then
+    if have.def == def or (from ~= nil and have.from == from) then return def.name end
+    return nil, string.format("the kit %s is already loaded from %s, and this is another, from %s",
+      def.name, have.from and q(have.from) or "Lua", from and q(from) or "Lua")
+  end
+  local list = compiled()
+  local skeletons = behaviour.skeletons()
+  local is = {}
+  for i = 1, #def.is do
+    local e = def.is[i]
+    local ex, bad = gherkin.expr(e.expr)
+    if not ex then return nil, string.format("the kit %s: the line %s does not compile: %s", def.name, q(e.expr), tostring(bad)) end
+    local sk = ex.skeleton()
+    if skeletons[sk] then
+      return nil, string.format("the kit %s: the line %s reads as the built-in step %s", def.name, q(e.expr), q(skeletons[sk]))
+    end
+    for _, c in ipairs(list) do
+      if c.expr.skeleton() == sk then
+        return nil, string.format("the kit %s: the line %s reads as the is line %s%s", def.name, q(e.expr), q(c.def.expr),
+          c.def.kit and (" of the kit " .. c.def.kit) or "")
+      end
+    end
+    for j = 1, i - 1 do
+      if is[j].expr.skeleton() == sk then
+        return nil, string.format("the kit %s: the lines %s and %s read the same", def.name, q(def.is[j].expr), q(e.expr))
+      end
+    end
+    is[i] = { expr = ex, def = e }
+  end
+  local steps = {}
+  for i = 1, #(def.steps or {}) do
+    local st = def.steps[i]
+    local ex, bad = gherkin.expr(st.expr)
+    if not ex then return nil, string.format("the kit %s: the step %s does not compile: %s", def.name, q(st.expr), tostring(bad)) end
+    local sk = ex.skeleton()
+    if skeletons[sk] then
+      return nil, string.format("the kit %s: the step %s collides with the built-in %s", def.name, q(st.expr), q(skeletons[sk]))
+    end
+    steps[i] = { expr = ex, def = st }
+  end
+  kits.registered[def.name] = { def = def, from = from, is = is, steps = steps }
+  kits.order[#kits.order + 1] = def.name
+  kits.version = kits.version + 1
+  return def.name
+end
+
+-- A kit file, compiled with what a body gets and called for its table. This is the one
+-- thing `declare` runs at load, and it runs to read a table (docs/spec/kit.md).
+local function compile_kit(text, name)
+  if type(text) ~= "string" or trim(text) == "" then return nil, "the file is empty" end
+  if text:find("\27", 1, true) then return nil, "a kit is text, and this holds an escape byte" end
+  local env = body_env()
+  local chunk, err
+  if type(setfenv) == "function" and type(loadstring) == "function" then
+    chunk, err = loadstring(text, "=" .. name)
+    if chunk then setfenv(chunk, env) end
+  else
+    chunk, err = load(text, "=" .. name, "t", env)
+  end
+  if not chunk then return nil, tostring(err) end
+  local ok, def = pcall(chunk)
+  if not ok then return nil, tostring(def) end
+  return def
+end
+
+-- Every `it uses the kit` line of the Background, loaded before the other lines are read.
+local KIT_EXPR = nil
+local function load_kits(doc, opts)
+  if not doc.background then return true end
+  KIT_EXPR = KIT_EXPR or assert(gherkin.expr(KIT_LINE))
+  for _, st in ipairs(doc.background.steps) do
+    local args = KIT_EXPR.match(st.text)
+    if args then
+      local path = args[1]
+      if type(opts.read) ~= "function" then
+        return at(st.line, "this host gives the loader no way to read %s", q(path))
+      end
+      local text, why = opts.read(path)
+      if not text then return at(st.line, "cannot read %s: %s", q(path), tostring(why)) end
+      local def, bad = compile_kit(text, path)
+      if def == nil then return at(st.line, "%s: %s", q(path), tostring(bad)) end
+      local name, bad2 = declare.kit(def, path)
+      if not name then return at(st.line, "%s: %s", q(path), tostring(bad2)) end
+    end
+  end
+  return true
 end
 
 --- What the Gherkin cannot say, and why. Every entry point of the surface is either named
@@ -650,11 +783,21 @@ local function build(plan, a, opts, title)
   elseif set.timeout then
     refuse(set.timeout.line, "a command's timeout needs `it runs commands`")
   end
-  if set.plan then guarded(set.plan.line, kits.plan, {}, s) end
-  if set.history then guarded(set.history.line, kits.history, s) end
+  if set.plan then guarded(set.plan.line, kits.plan, {}, s, a) end
+  if set.history then guarded(set.history.line, kits.history, s, a) end
   if set.authoring then
     local authoring = require "authoring"
     guarded(set.authoring.line, authoring.install, a, s, { folder = v "authoring" })
+  end
+  -- the workspace's kits: each installed once, with everything its lines told it
+  a.kit_files = nil
+  for _, f in ipairs(plan.kit_files) do
+    a.kit_files = a.kit_files or {}
+    a.kit_files[#a.kit_files + 1] = f.path
+  end
+  for _, name in ipairs(plan.kit_order) do
+    local k = plan.kits[name]
+    guarded(k.line, kits.use, a, name, k.told, s, k.lines)
   end
 
   -- stores, before the tools that write them
@@ -679,10 +822,10 @@ local function build(plan, a, opts, title)
       local chunk, why = compile_body(b.doc, "c", (title or "feature") .. ": the tool " .. name
                                       .. ", at line " .. b.line)
       if not chunk then refuse(b.line, "the body of %s does not compile: %s", name, why) end
-      return run_body(chunk)
+      return run_body(chunk), { kind = "lua", doc = b.doc }
     elseif b.kind == "answers" then
       local text = b.text
-      return function () return text end
+      return function () return text end, { kind = "answers", text = text }
     elseif b.kind == "adds" then
       local st = a.stores[b.store]
       if not st then refuse(b.line, "there is no store %s", b.store) end
@@ -702,7 +845,7 @@ local function build(plan, a, opts, title)
         local ok, why = c.store.add(store_name, row)
         if not ok then return nil, why end
         return "added a row to " .. store_name
-      end
+      end, { kind = "adds", store = store_name }
     elseif b.kind == "lists" then
       local st = a.stores[b.store]
       if not st then refuse(b.line, "there is no store %s", b.store) end
@@ -713,7 +856,7 @@ local function build(plan, a, opts, title)
         local out = {}
         for i = 1, #rows do out[i] = render_row(st, rows[i]) end
         return table.concat(out, "\n")
-      end
+      end, { kind = "lists", store = store_name }
     end
   end
 
@@ -724,7 +867,7 @@ local function build(plan, a, opts, title)
       local chunk, why = compile_body(r.doc, "c", (title or "feature") .. ": a requirement of " .. name
                                       .. ", at line " .. r.line)
       if not chunk then refuse(r.line, "the check of %s does not compile: %s", name, why) end
-      out[#out + 1] = { says = r.says, check = run_body(chunk) }
+      out[#out + 1] = { says = r.says, check = run_body(chunk), source = r.doc }
     end
     return #out > 0 and out or nil
   end
@@ -738,9 +881,10 @@ local function build(plan, a, opts, title)
       end
       local ask = m and m.ask and true or nil
       if m and m.edit then ask = { edit = m.edit } end
+      local run, said = body_of(name, m, t.line)
       guarded(t.line, s.tool(name), {
         about = t.about, args = t.args, ask = ask, preview = m and m.preview or nil,
-        requires = requires_of(name, m), run = body_of(name, m, t.line),
+        requires = requires_of(name, m), run = run, said = said,
       })
     else
       -- a delegate: the agent in another feature file
@@ -765,6 +909,9 @@ local function build(plan, a, opts, title)
         agents = { [child.name] = child },
         world = function () return child_world() end,
       })
+      a.kits = a.kits or {}
+      a.kits.delegates = a.kits.delegates or {}
+      a.kits.delegates[name] = { path = d.path }
     end
   end
 
@@ -808,6 +955,9 @@ local function build(plan, a, opts, title)
       -- Counted per run: a run's id is its agent's name, so two runs in a row share one,
       -- and the count starts again when a run does.
       local n, by_id = m.limit.n, {}
+      a.kits = a.kits or {}
+      a.kits.limits = a.kits.limits or {}
+      a.kits.limits[name] = n
       guarded(m.limit.line, s.on("start"), function (e) by_id[tostring(e.id)] = 0 end)
       guarded(m.limit.line, s.on("call"), function (e)
         if e.tool ~= name then return nil end
@@ -838,7 +988,7 @@ local function build(plan, a, opts, title)
   for _, st in ipairs(plan.steps) do
     local chunk, why = compile_body(st.doc, "c", (title or "feature") .. ": the step at line " .. st.line)
     if not chunk then refuse(st.line, "the step's body does not compile: %s", why) end
-    local d = {}
+    local d = { source = st.doc }
     if st.phase == "given" then d.given = run_body(chunk) else d.then_ = run_body(chunk) end
     guarded(st.line, s.step(st.expr), d)
   end
@@ -862,6 +1012,9 @@ function declare.apply(text, a, opts)
   opts = opts or {}
   local doc, why = gherkin.document(text)
   if not doc then return nil, why end
+  -- the kits first, so their lines are vocabulary when the rest of the Background is read
+  local loaded, kbad = load_kits(doc, opts)
+  if not loaded then return nil, kbad end
   local lines, bad = is_lines(doc)
   if not lines then return nil, bad end
 

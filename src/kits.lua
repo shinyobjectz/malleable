@@ -21,6 +21,119 @@ local function fail(fmt, ...)
   error("agent: " .. string.format(fmt, ...), 4)
 end
 
+-- What a kit was told, and the tools it put on the agent, kept on `a.kits[name]` so the
+-- declaration can be said back as is lines (src/say.lua, docs/spec/kit.md). `install`
+-- runs the kit and records the tools that appeared, with the about and ask they had
+-- before any feature line changed them.
+local function record(a, name, told, install)
+  local before, stores_before = {}, {}
+  for i = 1, #a.order do before[a.order[i]] = true end
+  for i = 1, #(a.store_order or {}) do stores_before[a.store_order[i]] = true end
+  local out = install()
+  local tools, stores = {}, {}
+  for i = 1, #a.order do
+    local t = a.order[i]
+    if not before[t] then tools[t] = { about = a.tools[t].about, ask = a.tools[t].ask } end
+  end
+  for i = 1, #(a.store_order or {}) do
+    local st = a.store_order[i]
+    if not stores_before[st] then stores[st] = true end
+  end
+  told.tools = tools
+  told.stores = stores
+  a.kits = a.kits or {}
+  a.kits[name] = told
+  return out
+end
+kits.record = record
+
+-- ------------------------------------------------------------------ a workspace's own kits
+--
+-- A kit is one Lua table of the shape docs/spec/kit.md gives: its is lines with their
+-- reach, what using it installs, the steps a scenario says its world with, and how it is
+-- said back. `kits.define` checks the shape; `declare.kit` compiles its lines against the
+-- vocabulary and registers it here, for the process, by name; `kits.use` installs it on one
+-- agent with what its lines told it.
+
+kits.registered = {}     -- name -> { def, from, is = { { expr, def } }, steps = { { expr, def } } }
+kits.order = {}
+kits.version = 0         -- bumped on every registration; declare recompiles its vocabulary on it
+
+local REACH = { widens = true, narrows = true, neither = true }
+local BUILT_IN_KITS = { files = true, shell = true, plan = true, history = true, authoring = true,
+                        limits = true, delegates = true }
+kits.BUILT_IN = BUILT_IN_KITS
+
+--- The shape, checked. Answers true, or nil and the rule broken, by name.
+function kits.define(def)
+  if type(def) ~= "table" then return nil, "a kit is a table, and this is " .. type(def) end
+  if type(def.name) ~= "string" or not def.name:match("^[%a_][%w_]*$") then
+    return nil, "a kit's `name` is a word of letters, digits and _"
+  end
+  local name = def.name
+  if BUILT_IN_KITS[name] then return nil, "the kit " .. name .. " takes the name of a built-in kit" end
+  if type(def.about) ~= "string" or def.about == "" then return nil, "the kit " .. name .. " needs `about`: a sentence" end
+  if type(def.is) ~= "table" or #def.is == 0 then return nil, "the kit " .. name .. " needs `is`: at least one line" end
+  for i = 1, #def.is do
+    local e = def.is[i]
+    if type(e) ~= "table" or type(e.expr) ~= "string" or e.expr == "" then
+      return nil, string.format("the kit %s: is line %d needs `expr`, the line as an expression", name, i)
+    end
+    if not REACH[e.reach] then
+      return nil, string.format("the kit %s: the line %q needs `reach`: widens, narrows or neither", name, e.expr)
+    end
+    if type(e.about) ~= "string" or e.about == "" then
+      return nil, string.format("the kit %s: the line %q needs `about`: a sentence", name, e.expr)
+    end
+    if type(e.tells) ~= "function" then
+      return nil, string.format("the kit %s: the line %q needs `tells = function (told, ...) end`", name, e.expr)
+    end
+  end
+  if type(def.install) ~= "function" then
+    return nil, "the kit " .. name .. " needs `install = function (told, agent) ... end`"
+  end
+  if def.steps ~= nil and type(def.steps) ~= "table" then return nil, "the kit " .. name .. ": `steps` is a list" end
+  for i = 1, #(def.steps or {}) do
+    local st = def.steps[i]
+    if type(st) ~= "table" or type(st.expr) ~= "string" or st.expr == "" then
+      return nil, string.format("the kit %s: step %d needs `expr`", name, i)
+    end
+    local g, t = type(st.given) == "function", type(st.then_) == "function"
+    if st.when ~= nil or st.when_ ~= nil then
+      return nil, string.format("the kit %s: the step %q gives a `when`, and there is no such slot", name, st.expr)
+    end
+    if g == t then
+      return nil, string.format("the kit %s: the step %q needs `given` or `then_`, one of them", name, st.expr)
+    end
+  end
+  if def.says ~= nil and type(def.says) ~= "function" then
+    return nil, "the kit " .. name .. ": `says` is a function of what it was told"
+  end
+  return true
+end
+
+--- Install the registered kit `name` on `a` through `surface`, with `told` (what its lines
+--- said) and `lines` (their text, for saying it back). Its steps are declared on the
+--- agent as the kit's, so a check does not count them as promises the file made.
+function kits.use(a, name, told, surface, lines)
+  local k = kits.registered[name]
+  if not k then
+    local have = {}
+    for i = 1, #kits.order do have[i] = kits.order[i] end
+    fail("there is no kit called %s; loaded: %s", tostring(name), #have > 0 and table.concat(have, ", ") or "none")
+  end
+  told = told or {}
+  return record(a, name, { told = told, lines = lines, kit = k.def, from = k.from }, function ()
+    k.def.install(told, surface)
+    for i = 1, #k.steps do
+      local st = k.steps[i].def
+      local d = { kit = name }
+      if st.given then d.given = st.given else d.then_ = st.then_ end
+      surface.step(st.expr, d)
+    end
+  end)
+end
+
 --- read, write, edit, list, glob, search. With no `opts.port` they read the filesystem the
 --- harness hands the tool body. The shim is `tools_fs.render`: bodies answer with a result
 --- table and a transcript holds text.
@@ -36,7 +149,8 @@ function kits.files(a, opts, surface)
     if def == nil then return declare end
     return declare(def)
   end
-  return tools_fs.install(shim, opts)
+  local told = { read_only = opts and opts.read_only or false, deny = opts and opts.deny or nil }
+  return record(a, "files", told, function () return tools_fs.install(shim, opts) end)
 end
 
 --- The shell tool. It asks by default (rule 4).
@@ -77,12 +191,13 @@ function kits.shell(a, opts)
     -- call. A host wanting the structure calls shell.run itself.
     return (body(c))
   end
-  return spec.add_tool(a, name, decl)
+  return record(a, "shell", { timeout_ms = rest.timeout_ms }, function () return spec.add_tool(a, name, decl) end)
 end
 
 --- The two plan tools, plan and mark, over one live plan.
-function kits.plan(opts, surface)
-  return work.install(surface, opts)
+function kits.plan(opts, surface, a)
+  if a == nil then return work.install(surface, opts) end
+  return record(a, "plan", {}, function () return work.install(surface, opts) end)
 end
 
 -- A reading tool's answer, from `from` (a character, 1 by default), cut at the limit with a
@@ -187,9 +302,13 @@ function kits.history_tools()
 end
 
 --- The three history tools, declared through `surface`.
-function kits.history(surface)
-  local defs, order = kits.history_tools()
-  for _, name in ipairs(order) do surface.tool(name)(defs[name]) end
+function kits.history(surface, a)
+  local function install()
+    local defs, order = kits.history_tools()
+    for _, name in ipairs(order) do surface.tool(name)(defs[name]) end
+  end
+  if a == nil then return install() end
+  return record(a, "history", {}, install)
 end
 
 --- A tool that runs another declared agent.

@@ -199,7 +199,9 @@ function spec.add_tool(a, name, t)
       if r.check_only ~= nil and type(r.check_only) ~= "boolean" then
         fail("the tool %q: requirement %d: `check_only` is true or false", name, i)
       end
-      requires[i] = { says = r.says, check = r.check, check_only = r.check_only == true }
+      -- `source` is the check's text when it came from a doc string, so `say` can say it back
+      requires[i] = { says = r.says, check = r.check, check_only = r.check_only == true,
+                      source = type(r.source) == "string" and r.source or nil }
     end
   end
 
@@ -224,9 +226,12 @@ function spec.add_tool(a, name, t)
 
   -- A tool that uses none of the options has the shape it always had (scripts/rules-test.lua,
   -- rule 3): the keys are there only when the declaration says them.
+  -- `said` is the body as a feature line said it (kind lua/answers/adds/lists, src/declare.lua),
+  -- kept so the declaration can be said back (src/say.lua); a Lua body has none.
+  if t.said ~= nil and type(t.said) ~= "table" then fail("the tool %q: `said` is a table", name) end
   local tool = { name = name, about = t.about, args = args, arg_order = order, run = t.run, ask = ask or false,
                  edit = edit, requires = #requires > 0 and requires or nil, preview = t.preview or nil,
-                 ends = t.ends or nil, effect = t.effect }
+                 ends = t.ends or nil, effect = t.effect, said = t.said }
   a.tools[name] = tool
   a.order[#a.order + 1] = name
   return tool
@@ -266,7 +271,9 @@ function spec.add_step(a, expr, d, compiled)
   end
 
   local step = { expr = expr, compiled = compiled, given = d.given, then_ = d.then_,
-                 phase = has_given and "given" or "then" }
+                 phase = has_given and "given" or "then",
+                 source = type(d.source) == "string" and d.source or nil,    -- its text, when a doc string
+                 kit = type(d.kit) == "string" and d.kit or nil }             -- the kit that declared it
   a.steps[expr] = step
   a.step_order[#a.step_order + 1] = expr
   return step

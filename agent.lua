@@ -145,10 +145,18 @@ local function prefix()
   -- of a feature file declare through too, so the two doors cannot drift.
   function s.files(opts) return kits.files(a, opts, s) end
   function s.shell(opts) return kits.shell(a, opts) end
-  function s.plan(opts) return kits.plan(opts, s) end
+  function s.plan(opts) return kits.plan(opts, s, a) end
   -- history, recall and evidence: the three tools that read the runs this agent's world has
   -- kept (docs/spec/history.md). None writes.
-  function s.history() return kits.history(s) end
+  function s.history() return kits.history(s, a) end
+  -- A kit of the workspace's own (docs/spec/kit.md): loaded for the process by its table,
+  -- and installed on this agent with `told`, what its lines would have said.
+  function s.kit(def, told)
+    local name, why = declare.kit(def)
+    if not name then fail("agent.kit: %s", tostring(why)) end
+    -- through the raw surface, as a feature installs it: on the prefix `store` is the module
+    return kits.use(a, name, told, cli.surface(a), nil)
+  end
 
   -- One tool plus the briefing that says what it can ask for. Declared skills and
   -- whatever the `skills` port lists arrive the same way. Callable and a module at once,
@@ -414,6 +422,8 @@ local function prefix()
       -- The same two facts `cli.drivers` gives: a store's Then lines read its declared
       -- shape, and `the tool {word} tells the model` reads the schema.
       stores = a.stores, schema = function () return spec.schema(a) end,
+      -- the declaration rendered as its own Background, so an eval knows what it says (src/say.lua)
+      said = (function () local ok, say = pcall(require, "say"); if ok then local ok2, t = pcall(say.render, a); if ok2 then return t end end return nil end)(),
     }
     for i = 1, #a.order do
       local name = a.order[i]

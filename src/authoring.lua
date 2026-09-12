@@ -443,6 +443,18 @@ function authoring.install(a, s, opts)
   end
   local locked = opts.locked
 
+  local before = {}
+  for i = 1, #a.order do before[a.order[i]] = true end
+  local function recorded()
+    local tools = {}
+    for i = 1, #a.order do
+      local t = a.order[i]
+      if not before[t] then tools[t] = { about = a.tools[t].about, ask = a.tools[t].ask } end
+    end
+    a.kits = a.kits or {}
+    a.kits.authoring = { folder = folder, tools = tools }
+  end
+
   s.tool "features" {
     about = "List the feature files under " .. (folder == "" and "the workspace" or q(folder))
       .. ". Each is one agent: what it is in its Background, what it does in its scenarios.",
@@ -533,6 +545,7 @@ function authoring.install(a, s, opts)
     args = EDIT_ARGS(s),
     run = function (c) return apply(folder, locked, c, true) end,
   }
+  recorded()
 end
 
 return authoring

@@ -168,6 +168,8 @@ local LONG = {
   ["--heading"]        = { field = "heading",        kind = "flag" },
   ["--feature"]        = { field = "feature",        kind = "string" },
   ["--tools"]          = { field = "show_tools",     kind = "flag" },
+  ["--say"]            = { field = "say",            kind = "flag" },
+  ["--conforms"]       = { field = "conforms",       kind = "string" },
   ["--session"]        = { field = "session",        kind = "string" },
   ["--json"]           = { field = "json",           kind = "flag" },
   ["--show-lines"]     = { field = "show_lines",     kind = "int",   low = 0 },
@@ -204,7 +206,7 @@ local KNOWN = {
   timeout = true, trust = true, allow = true, deny = true, yes = true,
   no = true, dry_run = true, reply = true, script = true, check = true,
   verify = true, feature = true, show_steps = true, talk = true,
-  show_tools = true, session = true, json = true, show_lines = true,
+  show_tools = true, session = true, json = true, show_lines = true, say = true, conforms = true,
   quiet = true, verbose = true, width = true, colour = true, help = true,
   version = true, path = true, prompt_source = true, argv = true, words = true,
   history = true, recall = true, evidence = true, day = true, since = true, file = true,
@@ -222,6 +224,7 @@ local function defaults()
     allow = {}, deny = {}, yes = false, no = false,
     dry_run = false, reply = {}, script = nil,
     check = false, verify = false, feature = nil, show_steps = false, show_tools = false, session = nil, json = false,
+    say = false, conforms = nil,
     talk = false,
     show_lines = 12, quiet = false, verbose = 0, width = nil, colour = nil,
     help = false, version = false,
@@ -520,6 +523,8 @@ function cli.drivers(a, run, opts)
     check = function (world, o) return turn.check(a, world, o) end,
     steps = {}, tools = {}, asks = {}, beats = {},
     stores = a.stores, schema = function () return spec.schema(a) end,
+    -- the declaration rendered as its own Background, so an eval knows what it says (src/say.lua)
+    said = (function () local ok, say = pcall(require, "say"); if ok then local ok2, t = pcall(say.render, a); if ok2 then return t end end return nil end)(),
   }
   for i = 1, #a.order do
     d.tools[a.order[i]] = true
@@ -1574,6 +1579,9 @@ pi [options] <declaration.lua> [prompt words ...]
       --script PATH       a Lua data file of scripted replies for --dry-run
       --check             load, validate, report, run nothing
       --tools             print the tool schema the model would be sent
+      --say               print the declaration as the Background that would declare it,
+                          and what no line can say (docs/spec/say.md)
+      --conforms PATH     load PATH too, and say what the two declarations say differently
       --session PATH      save the transcript as one session record
       --verify           run the feature beside the declaration, against the doubles
       --talk             a conversation: a fast talker answers each line typed, and hands
@@ -1838,6 +1846,35 @@ function cli.run(opts, world)
       agent = agent.name, model = agent.model, code = codes.answered,
       tools = spec.schema(agent),
     })
+  end
+
+  -- The declaration said back as is lines (docs/spec/say.md). Nothing runs.
+  if opts.say or opts.conforms then
+    local say = need_module("say", true)
+    if opts.say then
+      local text, unsaid = say.render(agent)
+      return report(text, { agent = agent.name, model = agent.model, code = codes.answered,
+                            said = text, unsaid = unsaid })
+    end
+    local other, oerr = cli.load(opts.conforms, world, nil)
+    if not other then
+      -- the same shape the program's own load failure takes, naming which of the two it was
+      return nil, { code = codes.load, message = "the contract " .. tostring(opts.conforms) .. ": " .. safe(oerr.message),
+                    why = oerr.code }
+    end
+    local r = say.conforms(agent, other)
+    local text = say.report(r, { program = tostring(opts.path), contract = tostring(opts.conforms) })
+    if r.ok then
+      return report(text, { agent = agent.name, model = agent.model, code = codes.answered, conforms = true })
+    end
+    if opts.json then
+      world.err(text)
+      world.out(json_object({ agent = agent.name, model = agent.model, code = codes.declaration, conforms = false,
+                              only_program = r.only_program, only_contract = r.only_contract }, codes.declaration))
+    else
+      world.out(text)
+    end
+    return codes.declaration
   end
   -- `--check` on its own looks at the declaration; with a feature named it looks at the
   -- feature, which is the branch below. One flag, one meaning: look before you run.
