@@ -9,7 +9,7 @@
 -- specs is what makes an unmet promise a number on every run rather than a bullet.
 
 local here = debug.getinfo(1, "S").source:match("^@(.*)[/\\][^/\\]*$") or "."
-local root = here .. "/.."
+local root = here .. "/../.."     -- docs/spec/ is two down from the tree
 package.path = root .. "/?.lua;" .. root .. "/src/?.lua;" .. package.path
 
 local agent     = require "agent"

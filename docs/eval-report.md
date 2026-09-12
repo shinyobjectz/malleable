@@ -587,6 +587,15 @@ After the changes: 1 079 tests pass, the same 14 fail as before (the folder move
 `example/` and `spec/` by the restructure in the shared tree, unrelated), and the eight
 rules of `scripts/rules-test.lua` hold. `evals/wall.feature` verifies 11 of 11.
 
+Amended 2026-09-12, evening: the 14 were stale paths, not broken code. The restructure
+moved `spec/` to `docs/spec/` and took the worked examples out of the published tree; the
+tests that drove those examples end to end (the reviewer, the embedded sandbox, the three
+system examples, the observe round trip) kept their coverage by taking the example files
+as fixtures under `test/fixtures/examples/`, the spec runner and the tree vocabulary
+learned they sit two folders down, and one test of four example features that never
+joined the tree was dropped in favour of the showcase test that makes the same claim over
+files that exist. The suite is now clean on both Luas.
+
 ## Files
 
 * `evals/notebook.feature`, `evals/author.feature`, `evals/reader.feature`: the real-model evals.

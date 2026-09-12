@@ -8,7 +8,7 @@
 local here = debug.getinfo(1, "S").source:match("^@(.*)[/\\]") or "."
 package.path = here .. "/../src/?.lua;" .. here .. "/../?.lua;" .. package.path
 
-local run = dofile(here .. "/../spec/run.lua")
+local run = dofile(here .. "/../docs/spec/run.lua")
 
 local T = {}
 
@@ -62,14 +62,14 @@ function T.every_feature_file_is_listed_and_every_listed_one_is_there()
 
   -- The other direction, read off the filesystem rather than trusted.
   local names = {}
-  local f = io.open(here .. "/../spec/run.lua", "rb")
+  local f = io.open(here .. "/../docs/spec/run.lua", "rb")
   local source = f:read("*a")
   f:close()
   for name, said in source:gmatch('{%s*"([%w%-_]+)",%s*(%a+)%s*}') do
     if said == "true" then names[name] = true end
   end
   for name in pairs(names) do
-    local exists = io.open(here .. "/../spec/" .. name .. ".feature", "rb")
+    local exists = io.open(here .. "/../docs/spec/" .. name .. ".feature", "rb")
     assert(exists, "spec/" .. name .. ".feature is listed as written and is not there")
     exists:close()
   end
@@ -83,12 +83,12 @@ end
 -- This half still matters on its own. A listed name with no .md is a spec somebody
 -- deleted while leaving the promise counted, which quietly inflates the work list.
 function T.every_name_on_the_work_list_is_a_spec_that_exists()
-  local f = io.open(here .. "/../spec/run.lua", "rb")
+  local f = io.open(here .. "/../docs/spec/run.lua", "rb")
   local source = f:read("*a")
   f:close()
   local missing = {}
   for name in source:gmatch('{%s*"([%w%-_]+)",%s*%a+%s*}') do
-    local md = io.open(here .. "/../spec/" .. name .. ".md", "rb")
+    local md = io.open(here .. "/../docs/spec/" .. name .. ".md", "rb")
     if md then md:close() else missing[#missing + 1] = name end
   end
   assert(#missing == 0,

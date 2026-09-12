@@ -20,7 +20,7 @@
 -- nothing under `src/` may, and the rule test that says so reads those files.
 
 local here = debug.getinfo(1, "S").source:match("^@(.*)[/\\][^/\\]*$") or "."
-local root = here .. "/.."
+local root = here .. "/../.."     -- docs/spec/ is two down from the tree
 
 package.path = root .. "/?.lua;" .. root .. "/src/?.lua;" .. package.path
 

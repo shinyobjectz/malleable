@@ -13,7 +13,7 @@ local T = {}
 
 local function load_example(name)
   agent.reset()
-  dofile(here .. "/../example/systems/" .. name)
+  dofile(here .. "/fixtures/examples/systems/" .. name)
   return agent.spec()
 end
 

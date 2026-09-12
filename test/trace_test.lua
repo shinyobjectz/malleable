@@ -394,7 +394,7 @@ end
 -- fails on either half of the disagreement. It is the check the ontology was going to be,
 -- moved into the tree that is published, where every embedder gets it.
 function T.the_spec_and_the_vocabulary_name_the_same_attributes()
-  local f = assert(io.open(here .. "/../spec/trace.md", "rb"), "spec/trace.md is missing")
+  local f = assert(io.open(here .. "/../docs/spec/trace.md", "rb"), "spec/trace.md is missing")
   local text = f:read("*a")
   f:close()
 

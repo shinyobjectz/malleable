@@ -493,14 +493,8 @@ local function run_cli(args)
   return code, table.concat(out), table.concat(err)
 end
 
-function T.the_runner_verifies_each_example_written_in_gherkin()
-  for _, name in ipairs { "counter", "greeter", "desk", "builder" } do
-    local code, out, err = run_cli { "--verify", here .. "/../example/" .. name .. ".feature" }
-    assert(code == 0, name .. ": " .. out .. err)
-    assert(contains(out, " 0 failed, 0 undefined, 0 broken"), name .. ": " .. out)
-  end
-end
-
+-- (the four example features this once verified never joined the tree; every showcase
+-- is verified by test/showcase_test.lua, which is the same claim over the files that exist)
 
 -- ------------------------------------------------------------------ always asks first (2026-09-12)
 

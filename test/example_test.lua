@@ -19,7 +19,7 @@ local T = {}
 function T.the_embedded_example_runs_inside_its_own_world()
   local agent = require "agent"
   agent.reset()
-  local chunk = assert(loadfile(here .. "/../example/embedded.lua"))
+  local chunk = assert(loadfile(here .. "/fixtures/examples/embedded.lua"))
   local saved = arg
   arg = {}
   local ok, why = pcall(chunk)
@@ -50,7 +50,7 @@ end
 -- is loaded once and these tests want it fresh.
 local function declared()
   agent.reset()
-  dofile(here .. "/../example/reviewer.lua")
+  dofile(here .. "/fixtures/examples/reviewer.lua")
   return agent.spec()
 end
 

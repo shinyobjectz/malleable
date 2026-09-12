@@ -371,14 +371,14 @@ function T.the_worked_example_survives_being_observed_and_run_again()
 
   -- The declaration, loaded without letting it run itself: `arg` is what its `is_main`
   -- reads, so an empty one makes the file declare and stop.
-  local chunk = assert(loadfile(here .. "/../example/reviewer.lua"))
+  local chunk = assert(loadfile(here .. "/fixtures/examples/reviewer.lua"))
   local saved = arg
   arg = {}
   local ok, why = pcall(chunk)
   arg = saved
   assert(ok, "the worked example does not load: " .. tostring(why))
 
-  local f = assert(io.open(here .. "/../example/reviewer.feature", "rb"))
+  local f = assert(io.open(here .. "/fixtures/examples/reviewer.feature", "rb"))
   local stated_text = f:read("*a")
   f:close()
 
