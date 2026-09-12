@@ -125,54 +125,20 @@ end
 -- The agents the talker hands work to. The one on the stage is --agent, or the notebook in
 -- the workspace's own agents/ folder; the author beside it edits the files there, its own
 -- included (docs/spec/agent-file.md). Both are put there from console/agents/ the first
--- time. Answers the surface, the path of the file shown, and the workers by name.
-local SEEDS = { "notebook", "author", "reader" }     -- put in the workspace the first time
-local KIT_SEEDS = { ["modes.lua"] = "library/modes.lua" }   -- the kits the seeded agents use (docs/spec/modes.md)
-local WORKERS = { "notebook", "author" }             -- the talker's own; the reader is the notebook's delegate
-
+-- time, with the kits they use (console/lib/seeds.lua; docs/spec/home.md, "The agents in
+-- the workspace"). Answers the surface, the path of the file shown, and the workers by name.
 local function load_agent(o, dir)
-  local agent = require "agent"
-  local declare, spec = require "declare", require "spec"
-  local folder = dir .. "/agents"
-  for _, name in ipairs(SEEDS) do
-    local path = folder .. "/" .. name .. ".feature"
-    if not read_file(path) then
-      local seed = archive and love.filesystem.read("console/agents/" .. name .. ".feature")
-                   or read_file(root .. "/console/agents/" .. name .. ".feature")
-      if seed then mkdir(folder); write_file(path, seed) end
-    end
-  end
-  for name, source in pairs(KIT_SEEDS) do
-    local path = folder .. "/" .. name
-    if not read_file(path) then
-      local seed = archive and love.filesystem.read(source) or read_file(root .. "/" .. source)
-      if seed then mkdir(folder); write_file(path, seed) end
-    end
-  end
-  local path = o.agent or (folder .. "/notebook.feature")
-  local text = read_file(path)
-  if not text then return nil, "no agent at " .. path end
-  local from = path:match("^(.*)[/\\][^/\\]*$") or "."
-  local function read(p)
-    local t = read_file(from .. "/" .. p)
-    if not t then return nil, "no such file" end
-    return t
-  end
-  local ok, why
-  if path:match("%.feature$") then ok, why = pcall(agent.declare, text, { read = read })
-  else ok, why = pcall(dofile, path) end
-  if not ok then return nil, tostring(why) end
-  local main = agent.spec()
-  local workers = { [main.name] = main }
-  for _, name in ipairs(WORKERS) do
-    local other = read_file(folder .. "/" .. name .. ".feature")
-    if other and folder .. "/" .. name .. ".feature" ~= path then
-      local s = spec.new()
-      local info, bad = declare.apply(other, s, { read = read })
-      if info and s.name and not workers[s.name] then workers[s.name] = s
-      else print("home: " .. name .. ".feature is left out: " .. tostring(bad or "it declares no name")) end
-    end
-  end
+  local seeds = require "console.lib.seeds"
+  local agent, path, workers, notes = seeds.load(o, dir, {
+    read  = read_file,
+    write = write_file,
+    mkdir = mkdir,
+    run   = dofile,
+    seed  = function (rel)
+      return archive and love.filesystem.read(rel) or read_file(root .. "/" .. rel)
+    end,
+  })
+  for _, n in ipairs(notes or {}) do print("home: " .. n) end
   return agent, path, workers
 end
 

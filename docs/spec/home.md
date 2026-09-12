@@ -75,6 +75,28 @@ drag, then its first frame at the new size). The screen is laid out again on tha
 nothing moves into place afterwards. Drawing during the drag would need the host to draw
 from inside the resize event, which LÖVE 11 does not offer from Lua.
 
+## The agents in the workspace
+
+Written 2026-09-12 (`docs/confidence-plan.md`, item 5), when the console had run the
+seeded author in modes only through the eval and never through its own loader.
+
+The workspace is a folder; its agents live in `agents/` under it. The first time the
+console opens a workspace it puts there the agents it ships (`console/agents/notebook`,
+`author` and `reader`) and the kits they use (`library/modes.lua`, as `agents/modes.lua`,
+because the author's file says `it uses the kit "modes.lua"` and a kit is read beside the
+file that uses it). A file already there is never overwritten: the workspace's copy is the
+person's. The agent on the stage is `--agent`, or the notebook; the talker's workers are
+the notebook and the author, each declared from its file, and one that will not declare
+is left out with a sentence in the log.
+
+This lives in `console/lib/seeds.lua`, which names no `love`, `io` or `os`: the host
+hands it four functions, `read(path)`, `write(path, text)`, `mkdir(path)` and `seed(rel)`
+(a file of the tree, from the archive or the checkout), and it answers the agent module,
+the path shown and the workers by name, plus the notes for the log. So a test seeds a
+table for a workspace and loads the author headless: `test/console_home_test.lua` asserts
+`agents/modes.lua` is written, the author declares the `mode` tool with its start, call
+and stop hooks, and both workers are there.
+
 ## Open
 
 - Both levels are peaks with a gain: the microphone's (times two) sits at 1 through most

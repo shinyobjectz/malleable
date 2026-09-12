@@ -542,4 +542,47 @@ function T.wrap_keeps_words_whole_and_breaks_a_long_one()
   assert(long[1] == "abcde" and long[2] == "fghij" and long[3] == "kl", table.concat(long, "|"))
 end
 
+
+function T.a_scratch_workspace_is_seeded_and_the_author_loads_in_modes()
+  -- docs/spec/home.md, "The agents in the workspace": the console's own loader, headless,
+  -- over a table for a workspace. The author uses the modes kit the console seeds beside it.
+  local seeds = require "console.lib.seeds"
+  local root = here .. "/.."
+  local function tree(rel)
+    local f = io.open(root .. "/" .. rel, "rb")
+    if not f then return nil end
+    local t = f:read("*a"); f:close(); return t
+  end
+  local files, made = {}, {}
+  local fs = {
+    read  = function (p) return files[p] end,
+    write = function (p, t) files[p] = t end,
+    mkdir = function (p) made[p] = true end,
+    seed  = tree,
+  }
+  local agent, path, workers, notes = seeds.load({ agent = "/ws/agents/author.feature" }, "/ws", fs)
+  assert(agent, tostring(path))
+  assert(path == "/ws/agents/author.feature")
+  assert(made["/ws/agents"], "the folder is made")
+  for _, name in ipairs { "notebook", "author", "reader" } do
+    assert(files["/ws/agents/" .. name .. ".feature"] == tree("console/agents/" .. name .. ".feature"), name .. " is seeded")
+  end
+  assert(files["/ws/agents/modes.lua"] == tree("library/modes.lua"), "the modes kit is seeded beside the agents")
+  local author = agent.spec()
+  assert(author.name == "author", tostring(author.name))
+  assert(author.tools.mode and author.tools.mode.ask == true and author.tools.mode.always == true, "the author has the mode tool, asking always")
+  assert(author.tools.propose and author.tools.propose.always == true, "propose asks always")
+  for _, hook in ipairs { "start", "call", "stop" } do
+    assert(author.hooks and author.hooks[hook] and #author.hooks[hook] > 0, "the kit's " .. hook .. " hook is on the author")
+  end
+  assert(author.kits and author.kits.modes, "the kit is recorded as used")
+  assert(workers.author == author and workers.notebook, "both workers are there")
+  assert(#notes == 0, table.concat(notes, "; "))
+  -- a second load overwrites nothing: the workspace's copy is the person's
+  files["/ws/agents/notebook.feature"] = "Feature: mine\n  Background:\n    Given the agent is called notebook\n    And its model is \"test:model\"\n"
+  local again = assert(seeds.load({}, "/ws", fs))
+  assert(files["/ws/agents/notebook.feature"]:find("Feature: mine", 1, true), "the person's file stands")
+  assert(again.spec().name == "notebook")
+end
+
 return T
