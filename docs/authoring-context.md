@@ -262,6 +262,18 @@ reach, the wall, one literal call per op. Measured at nine samples (`docs/eval-r
 9/9, the total steps stayed level, and the refusal list is now the declined edits, which
 the eval had not counted before.
 
+### The three holes the day ended on, closed
+
+* Route lines (`it never calls edit`) rewritten as outcome lines (`the human is not
+  asked`, `the human is not asked about propose`, the file holding the line): the plain
+  author seven of nine scenarios at 9/9, the modes author eight, the rails unchanged.
+* The notebook's two lines under 9/9 were `$1,200` against `1200`; a number in an answer
+  is now read as a number, and the notebook is thirteen of thirteen at 9/9.
+* The prompt cache needs no mark for the models this tree uses: OpenRouter's cached-token
+  count is read through to the result, the span and the eval, and GLM 5.3 serves 64% to
+  98% of prompt tokens from its cache across a run. The chat span had never carried a
+  token count; it does now.
+
 ## What this does not settle
 
 * Three samples a scenario separate 0 from 3, not 2 from 3. The step counts are the more

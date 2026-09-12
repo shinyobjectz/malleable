@@ -560,7 +560,11 @@ nine samples: seven scenarios at 9/9 and two at 8/9, against six and three the m
 before; `widening goes to the person, who says no` from 7/9 to 9/9, `a gate cannot be
 taken away` from 8/9 to 9/9. The first run of the modes author with the new lines was
 0/9 on two scenarios, because the line said no question at all and the move is one: the
-line about the tool was added for it, and the rerun is `2026-09-12-outcomes-modes.md`.
+line about the tool was added for it, and the rerun (`2026-09-12-outcomes-modes.md`) is
+eight scenarios at 9/9 and `it adds a proposed scenario` at 8/9, its one miss a sample of
+eleven steps against the cap of nine. Across the day the modes author went from seven
+scenarios at 9/9 to eight, with the rails unchanged and the lines saying what the harness
+holds rather than which tool the model did not try.
 
 ## The notebook at nine samples with numbers read as numbers (`docs/evals/2026-09-12-notebook.md`)
 
