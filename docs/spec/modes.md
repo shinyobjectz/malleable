@@ -53,8 +53,10 @@ what *may* be called, and a tool the agent lacks is never called anyway.
   mode, and otherwise makes the move and answers with the new mode's tools;
 * a hook on `start` that puts every run in the start mode;
 * a hook on `call` that refuses a call to a tool the current mode does not list, with the
-  sentence `in the mode reading it may call only features, feature, vocabulary, verify;
-  to edit, move to another mode with the mode tool, which asks the person`. The `mode`
+  sentence `first move out of the mode reading: call mode with to = editing, which asks
+  the person; in the mode reading you may call only features, feature, vocabulary,
+  verify, not edit` (reworded 2026-09-12 to lead with the action: at nine samples the
+  reading-mode refusal was the sentence models drew most, 60 calls in 30 samples). The `mode`
   tool itself is always callable. A refusal is a result the model reads, and the run goes
   on, exactly as a policy deny is.
 

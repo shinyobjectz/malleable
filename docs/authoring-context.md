@@ -249,6 +249,19 @@ model moving, being refused through `edit`, and getting the widening written thr
 The rail the modes kit carries and the rail the wall carries were two holes with one
 shape, and one fix: a question trust cannot waive.
 
+### The briefing as the standing text
+
+The nine-sample runs said the model learned the runtime by refusal: the reading-mode
+sentence was the most drawn of any, and the edit shapes cost four to seven calls on the
+scenario edit. The briefing is the system message of every run, the stable prefix a
+vendor caches, so the runtime's grammar belongs there and not in a skill the model reads
+by a call. Rewritten 2026-09-12 (`console/agents/author.feature`, `evals/author-modes.feature`):
+the architecture in two sentences, the order of work with the move first, the two tools by
+reach, the wall, one literal call per op. Measured at nine samples (`docs/eval-report.md`,
+"The briefing, expanded"): the mode refusals went to zero, one scenario rose from 7/9 to
+9/9, the total steps stayed level, and the refusal list is now the declined edits, which
+the eval had not counted before.
+
 ## What this does not settle
 
 * Three samples a scenario separate 0 from 3, not 2 from 3. The step counts are the more

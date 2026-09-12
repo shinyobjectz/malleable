@@ -323,27 +323,27 @@ end
 local function apply(folder, locked, c, gated)
   local args = c.args
   local full, why = resolve(folder, args.path, locked)
-  if not full then return "not applied: " .. why end
+  if not full then return false, "not applied: " .. why end
   local fs = c.fs
   local dir = dir_of(full)
 
   if args.op == "create" then
-    if fs.exists(full) then return "not applied: " .. q(args.path) .. " exists; edit it instead" end
+    if fs.exists(full) then return false, "not applied: " .. q(args.path) .. " exists; edit it instead" end
     if not gated then
-      return "not applied: a new agent widens what exists. Make it with propose, which asks the person first."
+      return false, "not applied: a new agent widens what exists. Make it with propose, which asks the person first."
     end
     local text = propose_all(keyworded(args.text))
     local doc, bad = gherkin.document(text)
-    if not doc then return "not applied: the file does not read: " .. bad end
+    if not doc then return false, "not applied: the file does not read: " .. bad end
     if not declare.declares(text) then
-      return "not applied: a new agent says what it is, in its Background, and this file does not. "
+      return false, "not applied: a new agent says what it is, in its Background, and this file does not. "
         .. "The least there is:\n\n" .. SKELETON .. "\nCall vocabulary for every line."
     end
     local ok, bad2 = load(text, fs, dir)
-    if not ok then return "not applied: the new agent does not load:\n" .. bad2 end
+    if not ok then return false, "not applied: the new agent does not load:\n" .. bad2 end
     local cannot = spec.problems(ok)
     if #cannot > 0 then
-      return "not applied: the new agent could not run: " .. table.concat(cannot, "; ")
+      return false, "not applied: the new agent could not run: " .. table.concat(cannot, "; ")
         .. ". The least there is:\n\n" .. SKELETON
     end
     local wrote, werr = fs.write(full, text)
@@ -354,23 +354,23 @@ local function apply(folder, locked, c, gated)
   end
 
   local op, bad = op_of(args)
-  if not op then return "not applied: " .. bad end
+  if not op then return false, "not applied: " .. bad end
   local text, rerr = fs.read(full)
-  if not text then return "not applied: cannot read " .. args.path .. ": " .. tostring(rerr) end
+  if not text then return false, "not applied: cannot read " .. args.path .. ": " .. tostring(rerr) end
   local new, change, wall = declare.edit(text, op)
-  if not new then return (wall and "" or "not applied: ") .. change end
+  if not new then return false, (wall and "" or "not applied: ") .. change end
   if change.reach == "widens" and not gated then
-    return "not applied: this " .. change.why .. ", which widens what the agent can reach. "
+    return false, "not applied: this " .. change.why .. ", which widens what the agent can reach. "
       .. "Make it with propose, which asks the person first."
   end
   if declare.declares(new) or declare.declares(text) then
     local ok, bad2 = load(new, fs, dir)
-    if not ok then return "not applied: the agent would not load: " .. bad2 end
+    if not ok then return false, "not applied: the agent would not load: " .. bad2 end
   end
   local before = declare.declares(text) and score(text, fs, dir) or nil
   local after = declare.declares(new) and score(new, fs, dir) or nil
   local lost = before and after and worse(before, after)
-  if lost then return "not applied: " .. lost end
+  if lost then return false, "not applied: " .. lost end
   local wrote, werr = fs.write(full, new)
   if not wrote then return nil, "could not write " .. args.path .. ": " .. tostring(werr) end
   c.note(string.format("%s %s: %s", args.path, change.reach, change.why))
@@ -480,7 +480,7 @@ function authoring.install(a, s, opts)
       local full, why = resolve(folder, c.args.path, nil)
       if not full then return nil, why end
       local text, err = c.fs.read(full)
-      if not text then return nil, tostring(err) end
+      if not text then return nil, err end
       return numbered(text)
     end,
   }
@@ -519,7 +519,7 @@ function authoring.install(a, s, opts)
       local full, why = resolve(folder, c.args.path, nil)
       if not full then return nil, why end
       local text, err = c.fs.read(full)
-      if not text then return nil, tostring(err) end
+      if not text then return nil, err end
       local decl, bad = load(text, c.fs, dir_of(full))
       if not decl then return nil, bad end
       local pickles, bad2 = declare.pickles(text, decl)

@@ -1074,11 +1074,11 @@ function behaviour.run(pickles, drivers, opts)
         -- model read and the call that drew it, which is the work list for the cost of an
         -- edit (docs/confidence-plan.md, item 4). A rate hides them; a step count only counts them.
         for _, c in ipairs(type(one.result) == "table" and one.result.calls or {}) do
-          if c.refused or c.ok == false then
+          if c.refused or c.declined or c.ok == false then
             local keys = {}
             for key in pairs(type(c.args) == "table" and c.args or {}) do keys[#keys + 1] = tostring(key) end
             table.sort(keys)
-            refusals[#refusals + 1] = { sample = k, tool = tostring(c.tool), failed = c.ok == false or nil,
+            refusals[#refusals + 1] = { sample = k, tool = tostring(c.tool), failed = c.ok == false or nil, declined = c.declined or nil,
               why = type(c.output) == "string" and c.output:gsub("%s+", " "):sub(1, 240) or "",
               args = keys, op = type(c.args) == "table" and type(c.args.op) == "string" and c.args.op or nil }
           end

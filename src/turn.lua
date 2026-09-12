@@ -918,6 +918,14 @@ function turn.run(agent, prompt, port, opts)
       rec.value = second
       return rec
     end
+    if v == false and n >= 2 and second ~= nil then
+      -- Declined, not failed (spec/turn.md): the sentence is the result, unprefixed, and
+      -- the record says so, for an eval that counts what a model learned by refusal.
+      rec.declined = true
+      rec.ok = true              -- the body ran and answered; the answer is a no
+      rec.output = text_of(second)
+      return rec
+    end
     if n > 1 then
       note("the tool " .. q(name) .. " returned " .. n .. " values; only the first was kept")
     end

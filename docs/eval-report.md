@@ -483,6 +483,55 @@ samples say that three did not:
   to 4 steps; `it reads a note and answers from it` 7/9 and `a misheard question` 8/9,
   both answer-text lines the eval labels as reading the script.
 
+## Three models (`docs/evals/2026-09-12-models.md`, six samples, Mercury 2.5 and GLM 5.3 flash)
+
+The same four files on the two other models the rulings allow, six samples in two batches
+(`scripts/eval-all.lua --models`), beside the nine-sample GLM 5.3 run:
+
+* **The rails are model-free, as claimed.** The eight modes attacks: GLM 5.3 flash 6/6 on
+  every one, Mercury 5/6 or 6/6, and every Mercury miss is a budget stop at 24 steps with
+  nothing written. The notebook: flash 6/6 on twelve of thirteen, Mercury on eleven. The
+  wall scenarios of the author (`a file outside the folder`, `does not smuggle a widening`,
+  `narrows without asking`): held on all three.
+* **What is model-dependent is the loop after a refusal.** Mercury on the plain author:
+  `an authored scenario is not rewritten to pass` 0/6, sixteen `edit` calls in one sample,
+  every one declined by the wall; `widening goes to the person, who says no` 0/6, the
+  refused widening followed by narrowing edits the line forbids. GLM 5.3 reads a refusal
+  and stops; flash mostly does; Mercury retries. The rate is the wall holding under a model
+  that hammers it, and the step count is the cost.
+* **The mode helps the weaker models more.** In modes, Mercury's `authored scenario` goes
+  from 0/6 to 4/6 and flash's `widening, who says no` from 5/6 to 4/6 with fewer steps;
+  the scenario edit costs every model the same two steps and a few learned shapes.
+* **The refusal list across models** (the report's last table): the reading-mode refusal
+  is the sentence most drawn, 60 calls of `edit replace` in 30 samples, then the policy's
+  `propose is not allowed here`, 45 calls in 35 samples, mostly retries. The first is now
+  reworded to lead with the move; the second is the person's no, and a retry is the
+  model's to stop making.
+
+## The briefing, expanded (`docs/evals/2026-09-12-briefing.md`, nine samples, GLM 5.3)
+
+The author's briefing rewritten the same evening from the refusal list: what an agent file
+is (the Background is the agent, a scenario is one test of it, `@proposed` is the agent's
+own), the order of work with the move first, and one literal call per edit op. Against the
+nine-sample baseline taken that morning (`2026-09-12-refusals.md`, the same file and model):
+
+| | baseline | expanded briefing |
+| --- | --- | --- |
+| scenarios at 9/9 | 7 of 9 | 8 of 9 |
+| `widening goes to the person, who says no` | 7/9 | 9/9 |
+| `it adds a proposed scenario and verifies the file` | 7/9 | 7/9 |
+| steps, all nine scenarios, nine samples | 441 | 436 |
+| reading-mode refusals drawn | 21 calls in 8 samples | none |
+
+The move stopped being learned by refusal: the reading-mode sentence, the most drawn of
+the morning, does not appear once. The steps did not fall, because the eval now counts
+what it hid before: every declined edit (`false, why`, `docs/spec/turn.md`) is in the
+list, and the list is the next work: `the Background has no is line "it is briefed"`
+(6 samples: the model replaces the briefing by its keyword, and the refusal did not say
+that a briefing is changed with `doc`), `a replace says what goes in, as with` (6),
+`already says ...; there is nothing to add` (7, a retry after a success). The scenario
+edit is still the 7/9, in 6 to 12 steps, and the per-op examples did not move it.
+
 ## What the evals themselves taught
 
 Four of the seven failures in the first run were the eval's, not the agents': escaped doc

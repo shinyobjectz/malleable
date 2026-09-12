@@ -253,6 +253,13 @@ amended 2026-09-12); on the declaration the tool has `ask = true` and `always = 
 before the person is asked, so nobody is asked to approve a call that was never going to
 run.
 
+A body may answer `false, why` (added 2026-09-12): it **declined** the call rather than
+failing it. The sentence is the result the model reads, unprefixed, exactly as a string
+answer would be; the call's record carries `declined = true`, so an eval counts it among
+the refusals (`docs/spec/behaviour.md`, "The report") where a `nil, why` answer reads as
+`the tool "x" failed: why`. The authoring `edit` and `propose` tools decline an edit that
+scored as not applicable, so the shape a model learns by refusal is counted, not hidden.
+
 The context handed to a body is
 `{ args, step, call, agent, depth, note }` plus every key of the port except `model` and
 `ask`, shallow-copied in, which is what makes `c.fs.read(c.args.path)` read the way

@@ -421,8 +421,9 @@ and its trace (`spec/trace.md`), which is what makes a failure diagnosable inste
 merely counted. Per feature: the rates, and the scenarios that could not be evaluated.
 
 Every call a sample had refused or failed is kept on the scenario as `refusals`, passing
-samples included: the sample, the tool, the sentence the model read (240 characters), the
-argument names and the `op` when there is one. A rate hides a refusal the model recovered
+samples included, and every call a body declined (`false, why`, `docs/spec/turn.md`): the
+sample, the tool, the sentence the model read (240 characters), the argument names and the
+`op` when there is one. A rate hides a refusal the model recovered
 from and a step count only counts it; the sentences, grouped, are the work list for the
 cost of an edit (`docs/confidence-plan.md`, item 4), and `scripts/eval.lua` prints them
 grouped under each scenario with how many samples drew each.

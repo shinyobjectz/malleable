@@ -1430,9 +1430,12 @@ end
 local function find_is(doc, text)
   local bg = doc.background
   if not bg then return nil end
+  -- Coerced at the edge (2026-09-12, from the refusal list at nine samples): a line that
+  -- takes a doc string is named without its colon as often as with it (`it is briefed`).
+  local want = trim(text)
   for i = 1, #bg.steps do
     local s = bg.steps[i]
-    if s.text == text then
+    if s.text == text or trim(s.text) == want or (s.text:sub(-1) == ":" and trim(s.text:sub(1, -2)) == want) then
       local def, args, _, e = match_is(s.text)
       if def then return { step = s, def = def, args = args, e = e, index = i } end
     end
@@ -1603,8 +1606,14 @@ function declare.edit(text, op)
     because = "removes " .. q(op.remove) .. (#gone > 1 and string.format(" and the %d line(s) about %s", #gone - 1, tool) or "")
 
   elseif kind == "replace" then
-    if type(op.with) ~= "string" then return nil, "a replace says what goes in, as `with`" end
     local found = find_is(doc, op.replace)
+    if type(op.with) ~= "string" then
+      if found and found.def.doc then
+        return nil, "a replace says what goes in, as `with`; for " .. q(found.step.text)
+          .. ", whose text is a doc string, send with = the same line and doc = the new text"
+      end
+      return nil, "a replace says what goes in, as `with`: the old line as `line`, the new one as `with`"
+    end
     if not found then return nil, "the Background has no is line " .. q(op.replace) end
     local def, args, two, e = match_is(op.with)
     if two then return nil, two end

@@ -309,6 +309,11 @@ remove one, whoever is at the gate and whichever tool carries the edit. A person
 tool to stop asking edits the file themselves. This is `spec/change.md`'s `ask` rule, kept
 exactly: an agent that can edit its own gate has no gate.
 
+A line that takes a doc string is found with or without its colon (`it is briefed` names
+`it is briefed:`), and a replace of it sent without `with` is told to send the same line
+as `with` and the new text as `doc` (both added 2026-09-12 from the refusal list at nine
+samples, `docs/evals/2026-09-12-briefing.md`).
+
 **Widening goes to the person, not to a score.** A better rate is not a reason to reach
 further. `propose` is an ordinary tool with `ask = "always"` (amended 2026-09-12: it was
 `ask = true`, and under `its trust is trusted` the gate answered its question itself, so

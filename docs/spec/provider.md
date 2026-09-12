@@ -561,6 +561,13 @@ it on would build a transcript the API rejects on the next step.
   belong where a reader is looking for them.
 - **It must not stream, batch or cache.** One request, one response. Streaming is a
   later, separate adapter function, and nothing in this contract may assume it exists.
+  (The upstream's own prompt cache is another matter, noted 2026-09-12: the system message
+  and the tool list are the stable prefix of every request a run makes, and `turn` sends
+  them first and unchanged, so a vendor that caches a prefix caches them. An explicit
+  cache mark on the system content is a request field OpenRouter forwards only to Anthropic
+  and Gemini models, which this tree does not use; it is not sent, and the day one of those
+  models is used it is a one-line addition to `openai_chat.lua`, with the mark on the
+  system message only.)
 - **It must not name an agent, a tool or a workspace.** It is vendor-aware by design and
   application-blind by rule.
 

@@ -147,9 +147,9 @@ by its measurement.
 | 6 | closed (`mar-sw4j`) | `evals/modes-trusted` and `modes-policy` hold the rail on the doubles; the wall test refuses removing `always asks first`; the attacks under trust went from three scenarios at 0 of 3 to eight at 3 of 3 once `propose` asked always too, a hole the run found and the plan had not named |
 | 3 | closed (`mar-0w7p`) | `evals/modes-rails.feature` failed on its first run against the shipped kit (the Then line read the nested run), the first fault the doubles found before a model; `test/fixtures/modes-v1.lua` fails it on both counts; kits with a hook must name `rails` and `delegate` |
 | 5 | closed (`mar-me3l`) | the headless load in the suite; one scripted console session, 66 s, the author's job 6 steps, the move asked and answered by typing, the line landed (`docs/eval-report.md`) |
-| 1 | in progress (`mar-mdcw`) | intervals beside every rate; `--seed`; `scripts/eval-all.lua` in parallel batches; the nine-sample run of the four files is `docs/evals/2026-09-12.md` |
-| 2 | open (`mar-4woi`) | `--models` is in `eval-all`; the runs on Mercury 2.5 and GLM 5.3 flash follow item 1's |
-| 4 | open (`mar-2kaz`) | every sample's refusals are kept and grouped; the tolerances wait on the ten-sample list |
+| 1 | closed (`mar-mdcw`) | intervals beside every rate; `--seed`; `scripts/eval-all.lua` in parallel batches; the nine-sample run of the four files is `docs/evals/2026-09-12.md`: rails at 9/9 with a lower bound of 0.70, the strict route lines at 7/9 |
+| 2 | closed (`mar-4woi`) | `docs/evals/2026-09-12-models.md`: the rails hold on all three models; what differs is the loop after a refusal (Mercury retries to the budget, GLM stops) |
+| 4 | closed as measured (`mar-2kaz`) | refusals kept per sample, declined edits counted, vocabulary by phase, the mode refusal leads with the move, the briefing carries the runtime: mode refusals to zero, steps level at 436 of 441, the scenario edit still 7/9; the acceptance (a third off the steps) was not met, and the remaining list is in `docs/evals/2026-09-12-briefing.md` |
 
 ## Tickets
 

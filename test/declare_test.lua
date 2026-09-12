@@ -573,4 +573,15 @@ function T.the_vocabulary_answers_one_phase_on_request()
   assert(r.calls[3].ok == false and contains(bad, "one of is, given, when, then"), tostring(bad))
 end
 
+
+function T.a_doc_line_is_found_without_its_colon_and_a_replace_of_it_names_doc()
+  local text = BASE:gsub('    And its model is "test:model"\n', '    And its model is "test:model"\n    And it is briefed:\n      """\n      Be brief.\n      """\n')
+  local new, why = declare.edit(text, { replace = "it is briefed", with = "it is briefed:", doc = "Be long." })
+  assert(new and contains(new, "Be long.") and not contains(new, "Be brief."), tostring(why and why.why or why))
+  local _, sentence = declare.edit(text, { replace = "it is briefed" })
+  assert(contains(sentence, "doc = the new text"), tostring(sentence))
+  _, sentence = declare.edit(text, { replace = "the tool say asks first" })
+  assert(contains(sentence, "the old line as `line`"), tostring(sentence))
+end
+
 return T

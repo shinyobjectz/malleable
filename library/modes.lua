@@ -142,8 +142,10 @@ return {
       local current = use.current
       local m = current and modes[current]
       if m and not m.allowed[e.tool] then
-        return { allow = false, why = "in the mode " .. current .. " it may call only " .. tools_of(current)
-          .. "; to call " .. tostring(e.tool) .. ", move to another mode with the mode tool, which asks the person" }
+        local to = modes[current].move_order[1]
+        return { allow = false, why = "first move out of the mode " .. current .. (to and (": call mode with to = " .. to) or "")
+          .. ", which asks the person; in the mode " .. current .. " you may call only " .. tools_of(current)
+          .. ", not " .. tostring(e.tool) }
       end
       return nil
     end)
