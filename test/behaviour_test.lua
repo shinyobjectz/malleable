@@ -717,4 +717,18 @@ function T.a_then_line_that_reads_only_the_script_is_labelled_and_the_scenario_i
   assert(r.not_evaluable == 0, tostring(r.not_evaluable))
 end
 
+
+function T.a_rate_carries_its_interval_and_the_report_prints_it()
+  local lo, hi = behaviour.interval(3, 3)
+  assert(lo > 0.43 and lo < 0.45 and hi == 1, lo .. " " .. hi)
+  lo, hi = behaviour.interval(9, 10)
+  assert(lo > 0.59 and lo < 0.61 and hi > 0.97 and hi < 0.99, lo .. " " .. hi)
+  lo, hi = behaviour.interval(0, 3)
+  assert(lo == 0 and hi > 0.55 and hi < 0.57, lo .. " " .. hi)
+  lo, hi = behaviour.interval(0, 0)
+  assert(lo == 0 and hi == 1)
+  local text = behaviour.report({ passed = 1, failed = 0, undefined = 0, broken = 0, skipped = 0, scenarios = { { name = "x", line = 1, outcome = "passed", samples = 10, passes = 9, rate = 0.9, steps = {} } } })
+  assert(text:find("9/10 (0.60-0.98)", 1, true), text)
+end
+
 return T

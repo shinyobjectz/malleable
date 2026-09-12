@@ -1090,6 +1090,7 @@ function behaviour.run(pickles, drivers, opts)
       last.samples = samples
       last.passes = passes
       last.rate = passes / samples
+      last.interval = { behaviour.interval(passes, samples) }
       last.failures = kept
       last.observations = seen
       last.taken = taken
@@ -1210,6 +1211,23 @@ end
 
 --- The report as text. Pure: the caller decides where it goes, because this tree has no
 --- idea what stdout is.
+--- The Wilson score interval of a rate at 95%: what `passes` of `samples` says about how
+--- often, which a count alone does not. `3/3` is 0.44 to 1.00 and `9/10` is 0.60 to 0.98;
+--- a rate whose interval is wider than the difference it is compared by says nothing
+--- (docs/confidence-plan.md, item 1). Answers `lo, hi`, both in [0, 1].
+function behaviour.interval(passes, samples)
+  local n = tonumber(samples) or 0
+  if n <= 0 then return 0, 1 end
+  local p, z = (tonumber(passes) or 0) / n, 1.96
+  local z2n = z * z / n
+  local centre = (p + z2n / 2) / (1 + z2n)
+  local half = z * math.sqrt(p * (1 - p) / n + z2n / (4 * n)) / (1 + z2n)
+  local lo, hi = centre - half, centre + half
+  if lo < 0 then lo = 0 end
+  if hi > 1 then hi = 1 end
+  return lo, hi
+end
+
 function behaviour.report(t, opts)
   opts = opts or {}
   local out = {}
@@ -1222,8 +1240,12 @@ function behaviour.report(t, opts)
     if s.samples and s.samples > 1 then
       mark = string.format("%3d%%", math.floor(s.rate * 100 + 0.5))
     end
-    line("%s  %s  (line %d)%s", mark, s.name, s.line,
-         (s.samples and s.samples > 1) and string.format("  %d/%d", s.passes, s.samples) or "")
+    local rate = ""
+    if s.samples and s.samples > 1 then
+      local lo, hi = behaviour.interval(s.passes, s.samples)
+      rate = string.format("  %d/%d (%.2f-%.2f)", s.passes, s.samples, lo, hi)
+    end
+    line("%s  %s  (line %d)%s", mark, s.name, s.line, rate)
     if s.why then line("        not evaluable: %s", s.why) end
     -- The lines whose passing needs the script the eval dropped: the diagnosis of a low
     -- rate, on the same screen as the rate (spec/behaviour.md, "Then lines that read the script").

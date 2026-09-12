@@ -33,9 +33,10 @@ while i <= #arg do
   elseif a == "--only" then args.only = arg[i + 1]; i = i + 2
   elseif a == "--out" then args.out = arg[i + 1]; i = i + 2
   elseif a == "--model" then args.model = arg[i + 1]; i = i + 2
+  elseif a == "--seed" then args.seed = tonumber(arg[i + 1]) or arg[i + 1]; i = i + 2
   else args.path = a; i = i + 1 end
 end
-if not args.path then io.stderr:write("usage: luajit scripts/eval.lua FEATURE [--samples N] [--only NAME] [--out FILE]\n"); os.exit(2) end
+if not args.path then io.stderr:write("usage: luajit scripts/eval.lua FEATURE [--samples N] [--only NAME] [--out FILE] [--model ID] [--seed N]\n"); os.exit(2) end
 
 local function read_file(path)
   local f = io.open(path, "rb")
@@ -91,9 +92,16 @@ local function did(result)
     result.stop ~= "answered" and result.reason and ("  " .. tostring(result.reason):gsub("%s+", " "):sub(1, 200)) or "")
 end
 
-local summary = { feature = args.path, samples = args.samples, seconds = took, scenarios = {} }
+local summary = { feature = args.path, samples = args.samples, seconds = took, scenarios = {},
+                  model = args.model or (decl.model and tostring(decl.model)) or nil, seed = args.seed,
+                  date = os.date("!%Y-%m-%d %H:%M UTC") }
 for _, sc in ipairs(report.scenarios) do
-  local line = string.format("%-56s %s", sc.name, sc.rate and string.format("%d/%d", sc.passes or 0, sc.samples or 0) or sc.outcome)
+  local rate = sc.outcome
+  if sc.rate then
+    local lo, hi = behaviour.interval(sc.passes or 0, sc.samples or 0)
+    rate = string.format("%d/%d (%.2f-%.2f)", sc.passes or 0, sc.samples or 0, lo, hi)
+  end
+  local line = string.format("%-56s %s", sc.name, rate)
   if sc.taken and #sc.taken > 0 then
     local parts = {}
     for k = 1, #sc.taken do parts[k] = tostring(sc.taken[k] or "?") end
@@ -115,7 +123,8 @@ for _, sc in ipairs(report.scenarios) do
   end
   summary.scenarios[#summary.scenarios + 1] = entry
 end
-io.write(string.format("%d scenario(s), %d sample(s) each, %d s\n", #report.scenarios, args.samples, took))
+io.write(string.format("%d scenario(s), %d sample(s) each, %d s%s%s\n", #report.scenarios, args.samples, took,
+  summary.model and ("  model " .. summary.model) or "", args.seed and ("  seed " .. tostring(args.seed)) or ""))
 
 if args.out then
   local f = assert(io.open(args.out, "wb"))
