@@ -1,6 +1,6 @@
--- The only file in the tree that touches the real world: build it, run, exit.
+-- The runner: bin/ is the host, and this file only wires it, runs, and exits.
 local here = debug.getinfo(1, "S").source:match("^@(.*)[/\\][^/\\]*$") or "."
-package.path = here .. "/../src/?.lua;" .. package.path
+package.path = here .. "/?.lua;" .. here .. "/../src/?.lua;" .. package.path
 local cli = require "cli"
 os.exit(cli.main(arg, {
   out  = function (text) io.stdout:write(text) end,
@@ -15,6 +15,6 @@ os.exit(cli.main(arg, {
     return text
   end,
   stdin = function () return io.read("*a") end,
-  env   = os.getenv,
-  now   = os.time,
+  env   = os.getenv,   now = os.time,   line = require("world").line,   sleep = require("world").sleep,
+  ports = require("world").ports,     -- bin/world.lua: the real ports
 }), true)

@@ -3,7 +3,7 @@
 --   local agent = require "agent"
 --
 --   agent.name  "reviewer"
---   agent.model "openrouter:inception/mercury-2.5"
+--   agent.model "openrouter:z-ai/glm-5.3"
 --   agent.tool "read" {
 --     about = "Read a file",
 --     args  = { path = agent.string "workspace-relative path" },
@@ -11,29 +11,18 @@
 --   }
 --   local result = agent.run("look at src/turn.lua", port)
 --
--- Everything the harness offers hangs off `agent`. There is no handle to thread, no
--- builder to close and no `return` at the end of a declaration file: the file is the
--- declaration, and requiring this module is what makes the names exist.
+-- Everything hangs off `agent`: no handle to thread, no builder to close, no `return` at
+-- the end of a declaration file. Requiring this module is what makes the names exist.
 --
--- This file requires nothing outside the tree. It puts its own `src/` on package.path
--- first, so `require "agent"` works with only the tree root on the path, and so does
--- `dofile ".../agent.lua"` with nothing on it at all.
---
--- Both of those are conveniences for a tree ON DISK, and a host that EMBEDS this one has
--- neither a path nor a `debug` library to find itself with: it fills `package.preload`
--- and there is no directory to name. So the whole gesture is guarded rather than
--- required. Before this, loading the prefix in an embedded interpreter failed on line
--- one with `attempt to index a nil value (global 'debug')` — a library that cannot be
--- loaded without `debug` is a library that cannot be embedded, which is most of what a
--- harness is for.
+-- The package.path gesture below is a convenience for a tree on disk and is guarded, not
+-- required: an embedding host fills `package.preload` and has neither a path nor `debug`.
 if type(debug) == "table" and type(debug.getinfo) == "function" and type(package) == "table" then
   local info = debug.getinfo(1, "S")
   local here = info and info.source and info.source:match("^@(.*)[/\\][^/\\]*$")
   if here then package.path = here .. "/src/?.lua;" .. (package.path or "") end
 end
 
--- A module may already be loaded under either name, depending on how the host set the
--- path up. Both are tried before the path is blamed.
+-- Either name may already be loaded, depending on how the host set the path up.
 local function part(name)
   local ok, m = pcall(require, name)
   if ok then return m end
@@ -66,21 +55,25 @@ local interpret  = part "interpret"
 local skills     = part "skills"
 local schedule   = part "schedule"
 local mcp        = part "mcp"
+local store      = part "store"
+local kits       = part "kits"
+local declare    = part "declare"
+local speech     = part "speech"
+local history    = part "history"
+local wait       = part "wait"
 
--- ---------------------------------------------------------------- small helpers
+-- small helpers
 
 local function fail(fmt, ...)
   error("agent: " .. string.format(fmt, ...), 3)
 end
 
--- The names that take one value and answer with the prefix, so `agent.name "x"` reads
--- as a statement and a host that prefers a chain gets one. cli.surface's own setters
--- answer with nothing, which is what the sandbox wants; the wrapping happens here.
-local SETTERS = { "name", "model", "system", "budget", "trust", "allow", "deny" }
+-- The one-value setters, wrapped to answer with the prefix so a host may chain.
+-- cli.surface's own setters answer with nothing, which is what the sandbox wants.
+local SETTERS = { "name", "model", "system", "budget", "reasoning", "trust", "allow", "deny" }
 
--- Writes the declaration surface onto the prefix, bound to one agent table. Called
--- again by `agent.reset`, because those closures hold the agent table they were built
--- for and nothing can make them let go of it.
+-- Writes the declaration surface onto the prefix, bound to one agent table. `agent.reset`
+-- calls it again: these closures hold the agent table they were built for.
 local function bind(s, a)
   local raw = cli.surface(a)
   for k, v in pairs(raw) do s[k] = v end
@@ -90,8 +83,19 @@ local function bind(s, a)
   end
 end
 
--- `run` is written two ways, because a host holds a declaration in a variable and a
--- declaration file does not. Both arrive as (declaration, prompt, port, opts).
+-- One run, kept when its world has a history (src/history.lua). A declared store is reached
+-- through its view (src/store.lua), and the world a delegate declared in a feature file
+-- hands its child is entered around the loop (src/declare.lua).
+local kept_run = history.keeper(function (decl, prompt, p, opts)
+  local bound = store.bind(decl, p)
+  local depth = declare.enter(bound)
+  local ok, result = pcall(turn.run, decl, prompt, bound, opts)
+  declare.leave(depth)
+  if not ok then error(result, 0) end
+  return result
+end)
+
+-- `run` takes both shapes; both arrive as (declaration, prompt, port, opts).
 local function run_args(bound, first, second, third, fourth)
   if type(first) == "table" and type(second) == "string" then
     return first, second, third, fourth      -- agent.run(other, prompt, port, opts)
@@ -99,127 +103,63 @@ local function run_args(bound, first, second, third, fourth)
   return bound, first, second, third         -- agent.run(prompt, port, opts)
 end
 
--- ------------------------------------------------------------------- the prefix
+-- the prefix
 
--- Builds one prefix table bound to one agent table. The module's own `agent` is the
--- first of these; `agent.new()` mints another, so two agents can be declared in one
--- process without either seeing the other's tools.
--- A feature arrives as text. It is pickled once, here, so both verbs read the same
--- flat list and a refusal says the same sentence either way.
-local function behaviour_pickles(feature)
+-- Builds one prefix bound to one agent table. `agent.new()` mints another, so two agents
+-- can be declared in one process without either seeing the other's tools.
+-- A feature is pickled once, here, so both verbs read the same flat list.
+-- The is lines are taken out (they were applied to the declaration, not run) and the
+-- shorthands expanded, so a feature that says what the agent is and one that only says
+-- what it does are walked the same way.
+local function behaviour_pickles(feature, a)
   if type(feature) ~= "string" then
     error("a feature is the text of a .feature file, and arrived as " .. type(feature), 3)
   end
-  return gherkin.pickle(feature)
+  return declare.pickles(feature, a)
 end
 
 local function prefix()
   local a = spec.new()
   local s = {}
+  local declared_text = nil             -- the feature file this agent was declared from
   bind(s, a)
 
-  -- What has been declared so far. The same table `agent.run` runs and `turn.run`
-  -- reads; handed out rather than copied, because a host that wants to inspect a
-  -- declaration wants the one that will run.
+  -- The same table `agent.run` runs and `turn.run` reads, handed out rather than copied.
   function s.spec() return a end
 
-  -- Start over on a fresh agent table. Everything on this prefix follows, because
-  -- every closure below reads `a` as it stands now.
+  -- Start over on a fresh agent table; every closure below reads `a` as it stands.
   function s.reset()
     a = spec.new()
+    declared_text = nil
     bind(s, a)
     return s
   end
 
   function s.new() return prefix() end
 
-  -- ------------------------------------------------------------------ toolkits
-  --
-  -- Each of these declares through this same prefix, so a toolkit's tool and a
+  -- Toolkits. Each declares through this same prefix, so a toolkit's tool and a
   -- hand-written one are the same kind of thing by the time the model sees them.
 
-  -- The filesystem tools: read, write, edit, list, glob, search. With no `opts.port`
-  -- they read the filesystem the harness hands the tool body, which is the usual way:
-  -- the port that runs the turn is the port the tools see.
-  --
-  -- Installed through a shim, because the bodies answer with a result table and a
-  -- transcript holds text. `tools_fs.render` turns one into the other; without it the
-  -- model reads "the tool returned a table of 8 entries" and never sees the file.
-  function s.files(opts)
-    local shim = {}
-    for k, v in pairs(s) do shim[k] = v end
-    shim.tool = function (name, def)
-      local function declare(d)
-        local body = d.run
-        d.run = function (c) return tools_fs.render(body(c)) end
-        return spec.add_tool(a, name, d)
-      end
-      if def == nil then return declare end
-      return declare(def)
-    end
-    return tools_fs.install(shim, opts)
-  end
+  -- read, write, edit, list, glob, search; the shell tool, which asks by default (rule 4);
+  -- and the two plan tools, plan and mark. Declared through src/kits.lua, which the is lines
+  -- of a feature file declare through too, so the two doors cannot drift.
+  function s.files(opts) return kits.files(a, opts, s) end
+  function s.shell(opts) return kits.shell(a, opts) end
+  function s.plan(opts) return kits.plan(opts, s) end
+  -- history, recall and evidence: the three tools that read the runs this agent's world has
+  -- kept (docs/spec/history.md). None writes.
+  function s.history() return kits.history(s) end
 
-  -- The shell tool. It asks by default, which is rule 4 and not this file's decision.
-  --
-  -- `name` and `root` are lifted out first: shell.options refuses an option it does
-  -- not know, and neither of those is one of its options. `root` is the workspace root
-  -- the tool reports and resolves a cwd against; tools_shell wants it on the tool
-  -- context, and a port table has no such field, so it is filled in here for a run
-  -- that does not carry one.
-  function s.shell(opts)
-    if opts ~= nil and type(opts) ~= "table" then
-      fail("agent.shell takes a table of options or nothing, got %s", type(opts))
-    end
-    local name, root, rest = "shell", ".", nil
-    if opts ~= nil then
-      rest = {}
-      for k, v in pairs(opts) do
-        if k == "name" then name = v
-        elseif k == "root" then root = v
-        else rest[k] = v end
-      end
-    end
-    if type(name) ~= "string" or name == "" then
-      fail("agent.shell: `name` is the tool's name, as a non-empty string")
-    end
-    if type(root) ~= "string" or root == "" then
-      fail("agent.shell: `root` is the workspace root, as a non-empty string")
-    end
-
-    -- What a command line DID, in terms, wired in here because `tools_shell.lua` reaches
-    -- into no sibling and this prefix is where composition belongs. A declaration that
-    -- names its own reader keeps it (spec/command.md, the bounded escape hatch).
-    rest = rest or {}
-    if rest.acts == nil then rest.acts = command.acts end
-
-    local decl = tools_sh.tool(rest)
-    local body = decl.run
-    decl.run = function (c)
-      if c.root == nil then c.root = root end
-      -- One value out. tools_shell answers with the rendered block and the result
-      -- table behind it, and a second return through the harness is dropped with a
-      -- note on every call; a host that wants the structure calls shell.run itself.
-      return (body(c))
-    end
-    return spec.add_tool(a, name, decl)
-  end
-
-  -- The two plan tools, plan and mark, over one live plan.
-  function s.plan(opts) return work.install(s, opts) end
-
-  -- The skill tool: one tool, and the briefing that tells the model what it can ask
-  -- for. Declared skills and whatever the `skills` port lists arrive the same way.
-  --
-  -- Callable and a module at once, so `agent.skills()` installs and `agent.skills.body`
-  -- reads. Two names for one seam is how a tree grows a second, drifting surface.
+  -- One tool plus the briefing that says what it can ask for. Declared skills and
+  -- whatever the `skills` port lists arrive the same way. Callable and a module at once,
+  -- so `agent.skills()` installs and `agent.skills.body` reads.
   s.skills = setmetatable({}, {
     __index    = skills,
     __call     = function (_, opts) return skills.install(s, opts) end,
     __metatable = "agent.skills",
   })
 
-  -- ------------------------------------------------------------------ the seams
+  -- the seams
 
   -- Ask every declared server for its tools and add them. Run time, not declaration
   -- time: rule 2. `agent.run` does this itself when a server is declared, so a host
@@ -270,6 +210,7 @@ local function prefix()
         local ro = {}
         if ropts then for k, v in pairs(ropts) do ro[k] = v end end
         ro.tracer, ro.parent = tracer, span
+        if ro.entry == nil then ro.entry = { cause = "beat" } end   -- kept as a beat (docs/spec/history.md)
         local ok, result = pcall(s.run, d, prompt, port, ro)
         if not ok then
           tracer.close_span(span, {}, false)
@@ -287,12 +228,12 @@ local function prefix()
 
   -- A tool that runs another declared agent. Curried like `agent.tool`.
   function s.delegate(name, cfg)
-    local function declare(c) return spec.add_tool(a, name, subagent.tool(c)) end
+    local function declare(c) return kits.delegate(a, name, c) end
     if cfg == nil then return declare end
     return declare(cfg)
   end
 
-  -- ------------------------------------------------------------------- running
+  -- running
 
   -- What the model will be told these tools are.
   function s.schema() return spec.schema(a) end
@@ -316,15 +257,12 @@ local function prefix()
     -- schema before the model is shown one.
     local problems = {}
 
-    -- The run's own tree starts HERE, not in the loop, because catalogueing skills and
-    -- connecting servers is part of invoking this agent and not a separate tree beside
-    -- it. Before this, the recorder was built inside `turn.run` and died with it, so
-    -- everything above was over before anything could record it — one cause behind four
-    -- missing span kinds rather than four separate omissions (mar-qghy).
+    -- The run's own tree starts HERE, not in the loop: catalogueing skills and connecting
+    -- servers is part of invoking this agent, and a recorder built inside `turn.run` would
+    -- not exist yet.
     --
-    -- A run started through some OTHER prefix -- `agent.tick` firing a beat, a delegate
-    -- calling back in -- hands its own recorder and its own parent down, so a tick is one
-    -- tree rather than one per beat.
+    -- A run started through another prefix -- `agent.tick` firing a beat, a delegate
+    -- calling back in -- hands its own recorder and parent down, so a tick is one tree.
     local o = {}
     if opts then for k, v in pairs(opts) do o[k] = v end end
     opts = o
@@ -385,26 +323,65 @@ local function prefix()
     -- it: a server that was never reached is a fact about the whole run and not about the
     -- step that noticed, and going in this way is what makes `malleable.notes` count them.
     if #problems > 0 then opts.notes = problems end
-    return turn.run(decl, prompt, p, opts)
+    -- Kept (docs/spec/history.md): a world with a history keeps every run, as a story and
+    -- its evidence, under an id claimed before the run, with this agent's feature text when
+    -- it was declared in one.
+    if decl == a and declared_text and opts.entry ~= false then
+      local e = {}
+      for k, v in pairs(type(opts.entry) == "table" and opts.entry or {}) do e[k] = v end
+      if e.declaration == nil then e.declaration = declared_text end
+      opts.entry = e
+    end
+    local ok, result = pcall(kept_run, decl, prompt, p, opts)
+    if not ok then error(result, 0) end
+    return result
   end
 
-  -- ------------------------------------------------------------------ the embed door
+  -- What the agent IS, from a feature file: the is lines of its Background applied to this
+  -- agent, as if each were the `agent.*` statement it names. A statement like the others,
+  -- so a Lua declaration may hold `agent.declare(text)` and a feature may say the rest.
+  -- Raises with the sentence and the line on a file it will not read, as every other
+  -- declaration statement does. `opts.read(path)` reads a file a line names.
+  function s.declare(text, opts)
+    local info, why = declare.apply(text, a, opts)
+    if not info then error("agent.declare: " .. tostring(why), 2) end
+    declared_text = text                -- kept with each run's evidence (docs/spec/history.md)
+    return s
+  end
+
+  -- A conversation with a talker in front and this agent behind it, doing the work as
+  -- background jobs (spec/speech.md). `cfg` is speech.new's; with no `workers`, this agent
+  -- is the one worker, and every run goes through this prefix's own `run`, so a worker's
+  -- stores, skills and servers are bound as they are for any run. Callable and a module at
+  -- once, like `agent.skills`: `agent.speech { world = port }` starts one, and
+  -- `agent.speech.talker { model = ... }` builds a talker to give it.
+  s.speech = setmetatable({}, {
+    __index = speech,
+    __call = function (_, cfg)
+      if cfg ~= nil and type(cfg) ~= "table" then
+        fail("agent.speech takes a table of options, got %s", type(cfg))
+      end
+      local o = {}
+      for k, v in pairs(cfg or {}) do o[k] = v end
+      if o.workers == nil then
+        if not a.name then fail("agent.speech: the agent needs a name to be a worker") end
+        o.workers = { [a.name] = a }
+      end
+      -- s.run keeps each run itself, with the feature text (src/history.lua)
+      if o.run == nil then o.run = history.keeps(function (d, prompt, port, ro) return s.run(d, prompt, port, ro) end) end
+      return speech.new(o)
+    end,
+    __metatable = "agent.speech",
+  })
+
+  -- The embed door: a whole world with nothing from the host -- a working shell over a
+  -- filesystem in memory, a frozen clock, a gate, a log, and a model that says plainly it
+  -- is not there.
   --
-  -- A whole world, with NOTHING from the host: a working shell over a filesystem in
-  -- memory, a frozen clock, a gate, a log, and a model that says plainly it is not there.
-  -- `bin/malleable.lua` is twenty lines and is the only file in this tree that touches
-  -- the real world; not one module names `io` or `os`. So the harness has always been
-  -- embeddable in anything with a Lua in it -- what was missing was a world to hand it
-  -- that did not come from outside, and this is that call.
+  -- Distinct from `agent.world`, which is the TEST double: its defaults are a test's, so
+  -- nothing runs that was not scripted. An embedder wants the opposite default.
   --
-  -- It is `sandbox` and not `world` on purpose. `agent.world` is the TEST double and its
-  -- defaults are a test's: nothing runs that was not scripted, because "nothing is
-  -- scripted for that" is the most useful sentence a double ever says. An embedder wants
-  -- the opposite default, and two names is how both get to be honest.
-  --
-  -- The gate DEFAULTS TO REFUSING. A sandbox is where an agent is allowed to try things,
-  -- which is exactly where a gate that said yes by default would be worst; a host that
-  -- wants otherwise says `ask = true` and has said it in writing.
+  -- The gate DEFAULTS TO REFUSING; a host that wants otherwise says `ask = true`.
   function s.sandbox(cfg)
     if cfg ~= nil and type(cfg) ~= "table" then
       fail("agent.sandbox takes a table of options or nothing, got %s", type(cfg))
@@ -417,7 +394,7 @@ local function prefix()
     return double.world(o)
   end
 
-  -- ------------------------------------------------------------ the behaviour half
+  -- the behaviour half
   --
   -- A declaration says what the agent IS. A feature file says what it DOES, in the
   -- language somebody would have used to ask for it, and these two verbs run it.
@@ -434,6 +411,9 @@ local function prefix()
         return ok, reasons
       end,
       steps = {}, tools = {}, asks = {}, beats = {},
+      -- The same two facts `cli.drivers` gives: a store's Then lines read its declared
+      -- shape, and `the tool {word} tells the model` reads the schema.
+      stores = a.stores, schema = function () return spec.schema(a) end,
     }
     for i = 1, #a.order do
       local name = a.order[i]
@@ -465,25 +445,24 @@ local function prefix()
   -- Run a feature against this declaration on the doubles. Answers the report table;
   -- `behaviour.report` renders it, because this tree has no idea what stdout is.
   function s.verify(feature, opts)
-    local pickles, why = behaviour_pickles(feature)
+    local pickles, why = behaviour_pickles(feature, a)
     if not pickles then return nil, why end
     return behaviour.run(pickles, drivers(), opts)
   end
 
   -- The SAME feature file, against a real model, k times per scenario, answering a rate.
   --
-  -- The world stays doubled and only the model is real: a real model driving real tools
-  -- against real files is not an eval, it is production. The two given lines that script
-  -- a model are dropped, and a scenario whose expectations only made sense against a
-  -- scripted one is reported not evaluable rather than scored.
+  -- The world stays doubled and only the model is real. The two given lines that script a
+  -- model are dropped, and a scenario whose expectations only made sense against a scripted
+  -- one is reported not evaluable rather than scored.
   --
-  -- No model judges anything. The Then lines are the same deterministic comparisons in
-  -- both modes; what is nondeterministic here is the system under test.
+  -- No model judges anything: the Then lines are the same deterministic comparisons in both
+  -- modes. What is nondeterministic is the system under test.
   ---@param feature string
   ---@param model table   the host's model port -- the one thing that is real
   ---@param opts table|nil  { samples = 20 }
   function s.evaluate(feature, model, opts)
-    local pickles, why = behaviour_pickles(feature)
+    local pickles, why = behaviour_pickles(feature, a)
     if not pickles then return nil, why end
     if type(model) ~= "table" and type(model) ~= "function" then
       return nil, "an eval needs the host's model port; the rest of the world stays doubled"
@@ -497,12 +476,12 @@ local function prefix()
   -- The problems a run would hit, as sentences, reaching no port at all. This is what an
   -- editor runs on every keystroke and what `--check` prints.
   function s.check_feature(feature)
-    local pickles, why = behaviour_pickles(feature)
+    local pickles, why = behaviour_pickles(feature, a)
     if not pickles then return { why } end
     return behaviour.check(pickles, drivers())
   end
 
-  -- ------------------------------------------------------- the rest of the tree
+  -- the rest of the tree
   --
   -- Named on the prefix so there is still one thing to remember. These are the
   -- modules, not more declaration surface: a host reaches for them, a declaration
@@ -518,6 +497,7 @@ local function prefix()
   s.compaction = compaction
   s.config     = config
   s.double     = double
+  s.store      = store          -- a program's declared tables of rows, and the view a tool body reaches
   s.interpret  = interpret
   s.port       = capport
   s.provider   = provider
@@ -527,12 +507,14 @@ local function prefix()
   s.change     = change         -- what a declaration may alter about itself, and what it may not
   s.trace      = trace
   s.gherkin    = gherkin
+  s.declared   = declare        -- an agent written in Gherkin, and the edits it may make to itself
   s.subagent   = subagent
   s.tools_fs   = tools_fs
   s.tools_sh   = tools_sh
   s.turn       = turn
   s.work       = work
   s.cli        = cli
+  s.wait       = wait           -- the table a port yields: host, sleep, person (spec/speech.md)
 
   return s
 end

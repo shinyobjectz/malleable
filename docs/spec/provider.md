@@ -41,7 +41,7 @@ already obeys. Nothing outside this subsystem should be written against their cu
 paths.
 
 It is not part of the `agent` declaration prefix. A declaration file names a model —
-`agent.model "openrouter:inception/mercury-2.5"` — and never mentions `provider`. The
+`agent.model "openrouter:z-ai/glm-5.3"` — and never mentions `provider`. The
 host builds the model port at start-up and hands it to `turn.run` inside the port table,
 in the slot `double.model` occupies in a test.
 
@@ -128,8 +128,8 @@ back as a value the caller reads.
 
 ### `provider.parse_model(id) -> scheme, name | nil, message`
 
-Splits `"openrouter:inception/mercury-2.5"` into `"openrouter"` and
-`"inception/mercury-2.5"` on the **first** colon. Pure; touches no port.
+Splits `"openrouter:z-ai/glm-5.3"` into `"openrouter"` and
+`"z-ai/glm-5.3"` on the **first** colon. Pure; touches no port.
 
 - `id` not a string → raises.
 - No colon, an empty scheme, or an empty name → `nil, message`. `"gpt-4o"` on its own is
@@ -245,8 +245,8 @@ The one concrete adapter, registered by default under `openai` (base
 `https://api.openai.com/v1`) and `openrouter` (base `https://openrouter.ai/api/v1`).
 Same code, different default base.
 
-**The model name sent** is the part after the scheme: `openrouter:inception/mercury-2.5`
-sends `"inception/mercury-2.5"`.
+**The model name sent** is the part after the scheme: `openrouter:z-ai/glm-5.3`
+sends `"z-ai/glm-5.3"`.
 
 **Messages.** port.md's three roles, and only these:
 

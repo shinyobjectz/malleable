@@ -6,17 +6,15 @@
 -- "src/shell.lua names no io", "trace.lua requires nothing", "the same script twice is
 -- byte-identical". Those are facts about the source, not about a run.
 --
--- They do not belong in the built-in vocabulary and they never will. Rule 7 keeps the
--- reader from knowing a harness exists at all, and the thirty-five expressions are about
--- an AGENT's behaviour; a tree that could describe its own files in the same words would
--- have two subjects wearing one vocabulary. So this is a second, small vocabulary,
--- declared through the same `agent.step` door any workspace has, and run by the same
--- runner -- which means an unbuilt promise reads as UNDEFINED and prints its own
--- skeleton, exactly like any other line nobody has written yet.
+-- They do not belong in the built-in vocabulary: rule 7 keeps the reader from knowing a
+-- harness exists, and the built-in expressions are about an AGENT's behaviour. So this is a
+-- second, small vocabulary, declared through the same `agent.step` door any workspace has
+-- and run by the same runner -- so an unbuilt promise reads as UNDEFINED and prints its own
+-- skeleton.
 --
--- That is the whole mechanism. A promise in prose is a bullet nobody checks; a promise
--- here is passed, failed or undefined, and the difference between the last two is the
--- difference between a spec that LIES and a spec that is AHEAD OF THE CODE.
+-- A promise in prose is a bullet nobody checks; a promise here is passed, failed or
+-- undefined, and the last two are the difference between a spec that LIES and one that is
+-- AHEAD OF THE CODE.
 --
 -- This file reads real files, so it names `io`. That is why it is here and not in `src/`:
 -- nothing under `src/` may, and the rule test that says so reads those files.
@@ -38,7 +36,7 @@ local observe = require "observe"
 
 local tree = {}
 
--- ------------------------------------------------------------------- reading the tree
+-- reading the tree
 
 local function slurp(path)
   local f = io.open(root .. "/" .. path, "rb")
@@ -48,9 +46,8 @@ local function slurp(path)
   return text
 end
 
--- Source with the comments taken out. A file is allowed to SAY "require" while explaining
--- why it does not call one, and a check that cannot tell those apart is a check that makes
--- the code harder to explain -- the failure mode mar-4o07 is about, in miniature.
+-- Source with the comments taken out: a file may SAY "require" while explaining why it
+-- does not call one, and a check that cannot tell those apart penalises explanation.
 local function code_of(path)
   local text = slurp(path)
   if text == nil then return nil end
@@ -59,25 +56,23 @@ end
 
 local function no(fmt, ...) return false, string.format(fmt, ...) end
 
--- A filesystem to run a command against, built from the one the scenario stated.
---
--- A Then line is handed a FROZEN world -- rule 6: a scenario that could act on what it
--- observes is a test that passed because it tested itself -- so the port's own functions
--- raise if called. What comes through readable is `fs.files`, the plain path-to-text map,
--- and a fresh filesystem is built from that. The commands then really run, and they run
--- somewhere the scenario cannot see, which is exactly the guarantee rule 6 is for.
 -- A doc string and a stream of bytes, compared.
 --
--- Gherkin's doc string has no trailing newline -- the fence ends the text -- and a
--- command's output almost always has one. So ONE trailing newline is allowed on the
--- output side and no other difference is: `"a\n"` matches the doc `a`, `"a\n\n"` does
--- not, and neither does `"a"` matching the doc `a\n`. Stated rather than trimmed, because
--- a comparison that trims both sides cannot tell "wrote nothing" from "wrote a blank line".
+-- A doc string has no trailing newline; a command's output almost always has one. ONE
+-- trailing newline is allowed on the output side and no other difference: `"a\n"` matches
+-- the doc `a`, `"a\n\n"` does not, nor does `"a"` match `a\n`. Stated rather than trimmed,
+-- so "wrote nothing" stays distinguishable from "wrote a blank line".
 local function same_text(out, doc)
   doc = doc or ""
   return out == doc or out == (doc .. "\n")
 end
 
+-- A filesystem to run a command against, built from the one the scenario stated.
+--
+-- A Then line is handed a FROZEN world (rule 6), so the port's own functions raise if
+-- called. What comes through readable is `fs.files`, the plain path-to-text map; a fresh
+-- filesystem is built from that, and the commands really run somewhere the scenario cannot
+-- see.
 local function staged(c)
   local files = {}
   local held = c.world and c.world.fs and c.world.fs.files
@@ -89,7 +84,7 @@ local function staged(c)
   return double.fs(files)
 end
 
--- ---------------------------------------------------------------------- the vocabulary
+-- the vocabulary
 --
 -- Twelve expressions, and they stay few. This vocabulary is for what a spec PROMISES
 -- about the tree, not for anything a person might want to assert about source; a bigger
@@ -97,7 +92,7 @@ end
 
 --- Declare the tree vocabulary onto the prefix. Called once, by whatever runs the specs.
 function tree.declare()
-  -- ---------------------------------------------------------------- what a file touches
+  -- what a file touches
 
   agent.step "the module {string} names no {word}" {
     then_ = function (c)
@@ -131,7 +126,7 @@ function tree.declare()
     end,
   }
 
-  -- ------------------------------------------------------------------ a shell, run
+  -- a shell, run
 
   -- No `a workspace holding {string}:` here: the built-in vocabulary already says that,
   -- as `the file {string} contains:`. A second expression for a thing the harness can
@@ -201,7 +196,7 @@ function tree.declare()
     end,
   }
 
-  -- --------------------------------------------------------------- a command, read
+  -- a command, read
 
   agent.step "the command line {string} did:" {
     then_ = function (c)
@@ -237,7 +232,7 @@ function tree.declare()
     end,
   }
 
-  -- ------------------------------------------------------------ a vocabulary, closed
+  -- a vocabulary, closed
 
   agent.step "the vocabulary {word} is closed" {
     then_ = function (c)
@@ -290,7 +285,7 @@ function tree.declare()
     end,
   }
 
-  -- --------------------------------------------------------- a declaration, changed
+  -- a declaration, changed
 
   agent.step "changing {word} to {value} is refused because {string}" {
     then_ = function (c)
@@ -377,7 +372,7 @@ function tree.declare()
     end,
   }
 
-  -- ------------------------------------------------------------- the two runtimes
+  -- the two runtimes
 
   agent.step "this holds under {word}" {
     then_ = function (c)

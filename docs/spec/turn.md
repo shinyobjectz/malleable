@@ -53,7 +53,8 @@ sent as an empty user message; the model gets to decide what an empty prompt mea
 part `turn` requires is:
 
 - `port.model.call(request) -> reply | nil, err` — required. `request` is
-  `{ model = string, system = string|nil, messages = <messages>, tools = <schema> }`.
+  `{ model = string, system = string|nil, messages = <messages>, tools = <schema>,
+  reasoning = string|nil }`, where `reasoning` is `agent.reasoning` when one is declared.
   On success it returns a `reply` table and no second value. On failure it returns `nil`
   plus an `err`. A reply is
   `{ text = string|nil, calls = { call, ... }, stop = string|nil }`, where each `call` is
@@ -100,6 +101,15 @@ instead of a decision table; the table is the one to write.
 | `depth` | number ≥ 0 | 0 | nesting depth, set by a parent run |
 | `max_depth` | number ≥ 0 | 3 | deepest nested run allowed |
 | `id` | string | `agent.name` | a label copied into the result and into hook payloads |
+| `history` | list of messages | none | the conversation so far, placed after the system message and before the prompt |
+
+**`history`** is how a conversation continues across runs (spec/speech.md): the messages
+of earlier runs, in the transcript's own shapes, `user`, `agent` (with its `calls`) and
+`tool`. They go into the transcript as they are, copied, and they reach the model like
+any other message. A list whose entries are not messages is refused like any other bad
+option: an entry that is not a table, a role outside those three, or a `text` that is not
+a string. The run does not check that a tool message answers a call. A history that
+breaks that pairing is the caller's, and the model's far side will say so.
 
 Unknown keys in `opts` are an error, not a shrug: a misspelt `budgets` that silently
 does nothing is the worst kind of bug in a thing whose job is to always terminate.
@@ -220,7 +230,9 @@ the dialect note says both interpreters must agree.
 3. Call the model. This is one step; `steps` increases whether the call succeeds or
    not.
 4. A reply with `calls` — validate each call, dispatch it, append one tool message per
-   call, fire `call` and `result` around each, then go to 2.
+   call, fire `call` and `result` around each, then go to 2. When every call ran, none
+   was refused, and each named a tool declared with `ends = true`, stop with `answered`
+   instead: the reply's own text, possibly empty, is the answer.
 5. A reply with text and no calls — stop with `answered`.
 6. A reply with neither — append a corrective user message saying what was expected, and
    go to 2, counting the malformed reply.
@@ -253,6 +265,78 @@ duplicate id inside one reply gets the minted form and a note; if the model has 
 spent that exact name on an earlier call in the same reply, the minted form gains a
 `.1`, `.2` and so on until it is free. Two calls in one reply never share an id, or the
 model cannot tell the two results apart.
+
+## Tools that end a run
+
+A tool declared with `ends = true` is an action whose result nobody needs to read before
+the run is over. Handing work to a background job is one example: the reply already said
+what the person needs to hear, and a second model call would only say it again. When
+every call in a reply is to such a tool, and every one ran without being refused, the
+run stops `answered`. The reply's text is the answer, and it may be empty. A refused or
+failed call does not end the run, so the model reads what went wrong and goes on. The
+stops stay the four they were. `ends` is a boolean on the declaration (`src/spec.lua`
+refuses anything else), and a tool that does not say it has the shape it always had.
+
+## Requirements
+
+A tool may state what a call must meet before it runs:
+
+    requires = {
+      { says = "the lamp can be reached from the moth", check = reachable },
+      { says = "no row is empty", check = rows_full, check_only = true },
+    }
+
+Each `check` gets the same context the body would, and answers `true` to let the call on,
+or anything else — `false`, `nil`, `false` and a reason — to stop it. They run in order,
+after the arguments are checked and before the gate: a person is never asked to approve a
+call that cannot be made. The first unmet one ends the call, which is not a refusal but a
+failure the model reads:
+
+    the call to "set_room" was not made: it requires that the lamp can be reached from the moth (a wall is between them).
+
+The reason in brackets is the check's second value, when it gives one; a check that raises
+is unmet, and its error is the reason. The model sees the requirement and repairs its call
+on the next step, inside the budget, instead of starting over — Mellea's
+instruct–validate–repair, with the harness doing the validating.
+
+`says` is also part of what the model is told the tool is (`spec.schema`: the tool's
+`about`, then " It requires: …"), so a model meets the requirement before it ever calls.
+`check_only = true` keeps a requirement out of the description: some things are better
+checked than said, because naming what you do not want invites it.
+
+The record carries `unmet = says` on the call; the result event carries it too; the span
+gets `malleable.requirement = "unmet"` (a closed value, never the sentence, rule 8). A
+feature says it with `the first call to set_room fails because "…"`, and `observe` writes
+that line for a call whose requirement was unmet.
+
+## Edits at the gate
+
+A tool that asks may let the person change what the model proposed:
+
+    ask = { edit = "where" },            -- or { edit = { "where", "how_far" } }
+
+The named arguments must be `one_of`, `boolean` or `number` — values a person can step
+through on six buttons; a string cannot be edited at the gate, and the declaration raises.
+The gate's request gains `edit` (the names) and `choices` (for each, its list, or its
+kind), beside the model's `args`.
+
+An approval may carry `args`: `{ allow = true, args = { where = "near" } }`. Only the
+editable arguments are read from it; every other argument is the model's. The changed
+arguments are checked like the model's were, and a value the tool does not take is a
+refusal, never a call with arguments nobody approved. A call that went through with an
+edit has `edited = { where = "near" }` on its record and its result event, its `args` are
+what ran, and its output ends with the line the model reads so what it says next is true:
+
+    moved near
+    (the person chose near for where)
+
+An approval whose values equal the model's is a plain approval, not an edit. The span's
+`malleable.gate.answer` is `edited` for an edit. `Given the human approves move_lamp with
+{"where": "near"}` scripts one, and `observe` writes it back.
+
+The approval gate in `src/approval.lua`, which the CLI puts in front of its port, reads
+allow and deny only: under the CLI a tool that allows edits is approved as the model
+proposed it. The console's gate carries edits.
 
 ## Failure modes
 

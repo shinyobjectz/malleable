@@ -109,10 +109,11 @@ The single most important contract in the tree.
 
 | field | type | meaning |
 | --- | --- | --- |
-| `model` | string, required | the id from `agent.model`, e.g. `"openrouter:inception/mercury-2.5"` |
+| `model` | string, required | the id from `agent.model`, e.g. `"openrouter:z-ai/glm-5.3"` |
 | `system` | string or nil | the system prompt |
 | `messages` | list, required, may be empty | the transcript so far, oldest first |
 | `tools` | list or nil | exactly what `spec.schema(a)` returned |
+| `reasoning` | string or nil | from `agent.reasoning`: `"none"`, `"low"`, `"medium"` or `"high"`; a port that can tell its model how hard to think does, and one that cannot ignores it |
 | `timeout` | number or nil | seconds; advisory, see failure modes |
 
 A message is one of three shapes, discriminated by `role`:
@@ -218,7 +219,10 @@ rather than a busy loop burning a core.
 
     p.ask.request(q) -> decision
 
-`q` is `{ tool = "write", about = "Write a file", args = { path = "notes.md" } }`.
+`q` is `{ tool = "write", about = "Write a file", args = { path = "notes.md" } }`. A tool
+that lets the person edit (`ask = { edit = ... }`, spec/turn.md, "Edits at the gate") adds
+`edit`, the names they may change, and `choices`, each one's list or kind; an approval
+may then carry `args`, the person's values for those names.
 
 `decision` is `{ allow = false, why = "not outside src/", remember = "once" }`. `allow`
 is a boolean and is required. `why` is a string or nil. `remember` is `"once"`,
@@ -233,6 +237,14 @@ refusal**, never an open gate and never an exception. Rule 4 then carries that r
 to the model as an ordinary result.
 
 Raises if `q` is not a table or `q.tool` is not a non-empty string.
+
+### The store port
+
+    p.store.read(name) -> rows | nil
+    p.store.write(name, rows, change) -> true | nil, why
+
+Where a program's rows live. The host holds them; a tool body reaches them through the
+view `store.bind` puts in their place, never raw. The whole contract is spec/store.md.
 
 ### The log port
 

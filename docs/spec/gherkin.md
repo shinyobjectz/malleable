@@ -115,6 +115,15 @@ Then — is refused with a sentence naming both lines. This is the one place thi
 stricter than Cucumber, and it is deliberate: the alternative is a world that is half
 built when the run starts.
 
+## The document
+
+`gherkin.pickle` is the door a runner uses. `gherkin.document(text)` is the second, for a
+reader that needs a block apart from what pickling merges into it: the feature's name and
+tags, its background, its scenarios and its rules, each with its **own** steps, every step
+with `line` and, when a doc string or table runs past it, `last`. `spec/declare.md` reads
+the background this way, because what an agent is is said once there, and a shorthand this
+way, because its lines are its own. It answers a copy and nothing about a description.
+
 ## Expressions
 
 A **cucumber expression** is the pattern a step's text is matched against. It is compiled
@@ -159,7 +168,7 @@ practice.
 a world, a result or a run, and may not require another module in this tree except the
 JSON reader. It takes text and answers with tables.
 
-*Test: `the_reader_knows_no_harness`, which reads the file, in `rules-test.lua` beside the
+*Test: `the_reader_knows_no_harness`, which reads the file, in `scripts/rules-test.lua` beside the
 other five.*
 
 ## Two readers, one subset

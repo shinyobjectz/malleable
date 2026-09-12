@@ -188,7 +188,7 @@ a boundary you cannot construct in a test is a boundary nobody checks.
 `env` contains exactly:
 
 * `agent` — the public prefix, bound to `a`. `agent.name`, `agent.model`,
-  `agent.system`, `agent.budget`, `agent.tool`, `agent.on`, `agent.trust`,
+  `agent.system`, `agent.budget`, `agent.reasoning`, `agent.tool`, `agent.on`, `agent.trust`,
   `agent.allow`, `agent.deny`, and the argument types `agent.string`,
   `agent.string_opt`, `agent.number`, `agent.number_opt`, `agent.boolean`,
   `agent.boolean_opt`, `agent.table`, `agent.table_opt`, `agent.list`,
@@ -293,7 +293,7 @@ possible moment to have nothing to read.
 
 Shape, ASCII only, one blank line between steps:
 
-    pi  reviewer  openrouter:inception/mercury-2.5  budget 8  root .
+    pi  reviewer  openrouter:z-ai/glm-5.3  budget 8  root .
     approvals: ask
 
     > review src/turn.lua

@@ -151,6 +151,9 @@ The whole of the subsystem's runtime behaviour. **It never raises and never retu
   remembered = boolean,          -- whether this answer was stored for the run
   scope      = string or nil,    -- "tool" | "args", only when remembered
   policy     = number or nil,    -- the entry's index, only when source == "policy"
+  args       = table or nil,     -- the person's own values for what they may change,
+                                 -- as the port answered them (spec/turn.md, "Edits at
+                                 -- the gate"); only when source == "port"
 }
 ```
 
@@ -194,6 +197,11 @@ The gate does **not** build the tool result the model reads. It hands `allowed` 
 `reason` to `turn`, which wraps a refusal in the same result shape a tool body would
 have produced. That is the boundary rule 4 turns on: the model must not be able to tell
 a refusal from an ordinary unwelcome answer by its *shape*, only by its text.
+
+The `args` field is the one thing the gate carries from the port untouched: a decision
+that dropped it made every `letting the person change` line a dead letter through
+`cli.bind`, while the doubles' direct path honoured it (found by `showcase/03-gates.feature`,
+2026-09-12).
 
 ### 2.4 `gate:remember(tool, allowed, scope, args) -> boolean, string`
 

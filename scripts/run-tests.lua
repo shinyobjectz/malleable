@@ -5,19 +5,27 @@
 -- raises is the failure, printed with its message. Order is alphabetical by file and
 -- then by name, so two runs of an unchanged tree print the same lines.
 
-local here = debug.getinfo(1, "S").source:match("^@(.*)[/\\][^/\\]*$") or "."
+-- This file lives in `scripts/`, so the tree is its parent. Derived from the script's own
+-- location rather than the working directory, so it runs from anywhere.
+local at   = debug.getinfo(1, "S").source:match("^@(.*)[/\\][^/\\]*$") or "."
+local here = at .. "/.."
 package.path = here .. "/src/?.lua;" .. here .. "/?.lua;" .. package.path
 
 -- The file list. `io.popen` is the only way a stock Lua sees a directory, and a run
 -- with no `ls` should say so rather than report zero failures out of zero tests.
-local function test_files(dir)
+local function test_files(dir, only)
   local names = {}
-  local pipe = io.popen('ls "' .. dir .. '" 2>/dev/null')
-  if pipe then
+  local opened, pipe = pcall(io.popen, 'ls "' .. dir .. '" 2>/dev/null')
+  if opened and pipe then
     for line in pipe:lines() do
       if line:match("_test%.lua$") then names[#names + 1] = line end
     end
     pipe:close()
+  end
+  -- Where there is no `ls` at all (WebAssembly), a run that names its file still runs it.
+  if #names == 0 and only then
+    local f = io.open(dir .. "/" .. only .. "_test.lua")
+    if f then f:close(); names[1] = only .. "_test.lua" end
   end
   table.sort(names)
   return names
@@ -34,7 +42,7 @@ end
 
 local only = arg and arg[1]        -- run one file, or the tests whose name contains this
 
-local files = test_files(here .. "/test")
+local files = test_files(here .. "/test", only)
 if #files == 0 then
   io.stderr:write("no test files found under " .. here .. "/test\n")
   os.exit(1)

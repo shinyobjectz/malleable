@@ -26,8 +26,29 @@
 ---@class agent.tool.decl
 ---@field about string        one sentence: what it is for, and when to reach for it
 ---@field args table<string, agent.arg>|nil
----@field ask boolean|nil     put it to the human before the body runs
+---@field ask boolean|agent.ask.edit|nil  put it to the human before the body runs
+---@field requires agent.requirement[]|nil what a call must meet before it runs
+---@field preview boolean|nil a host may show the arguments before the tool runs
 ---@field run fun(c: agent.ctx): any, string|nil
+
+---@class agent.ask.edit
+---@field edit string|string[]  the arguments the person may change before approving
+
+---@class agent.requirement
+---@field says string            told to the model with the tool's about, and the reason a call fails
+---@field check fun(c: agent.ctx): boolean, string|nil
+---@field check_only boolean|nil checked, never told to the model
+
+---@class agent.store.decl
+---@field about string          what one row is
+---@field columns table<string, agent.arg>
+---@field sort string|string[]|nil  the columns a listing is sorted by first
+
+---@class agent.port.store
+---@field rows fun(store: string): table[]
+---@field add fun(store: string, row: table): boolean|nil, string|nil
+---@field change fun(store: string, where: table, set: table): integer|nil, string|nil
+---@field remove fun(store: string, where: table): integer|nil, string|nil
 
 ---@class agent.ctx
 ---@field args table<string, any>
@@ -35,7 +56,9 @@
 ---@field sh agent.port.sh
 ---@field clock agent.port.clock
 ---@field log agent.port.log
+---@field store agent.port.store  the program's declared stores (src/store.lua)
 ---@field note fun(text: string)
+---@field history table|nil  the kept runs, read only: find, recall, evidence, kept, line
 ---@field world table
 
 ---------------------------------------------------------------------------- the ports
@@ -71,6 +94,7 @@
 ---@field skills table|nil
 ---@field ledger table|nil
 ---@field mcp table|nil
+---@field history table|nil   where runs are kept (spec/history.md); a tool body gets a view that reads
 
 ---------------------------------------------------------------------------- a result
 
@@ -141,6 +165,9 @@ function agent.system(v) end
 ---@param v integer
 ---@return agent
 function agent.budget(v) end
+---@param v "none"|"low"|"medium"|"high"  how hard the model thinks before it answers
+---@return agent
+function agent.reasoning(v) end
 
 -- its standing permission policy -------------------------------------------------------
 
@@ -185,6 +212,10 @@ function agent.every(name, decl) end
 ---@param decl table|nil
 ---@return any
 function agent.uses(name, decl) end
+---@param name string
+---@param decl agent.store.decl|nil
+---@return any
+function agent.store(name, decl) end
 
 -- argument types -----------------------------------------------------------------------
 
@@ -218,6 +249,13 @@ function agent.table_opt(about) end
 ---@param about string
 ---@return agent.arg
 function agent.list_opt(about) end
+--- A string from a closed list: `agent.one_of "why" { "near", "far" }`.
+---@param about string|string[]
+---@return agent.arg|fun(choices: string[]): agent.arg
+function agent.one_of(about) end
+---@param about string|string[]
+---@return agent.arg|fun(choices: string[]): agent.arg
+function agent.one_of_opt(about) end
 
 -- the toolkits -------------------------------------------------------------------------
 
@@ -227,6 +265,9 @@ function agent.files(cfg) end
 function agent.shell(cfg) end
 ---@param cfg table|nil
 function agent.plan(cfg) end
+--- history, recall and evidence: the tools that read the runs the world has kept.
+function agent.history() end
+
 ---@param name string
 ---@param cfg table|nil
 ---@return any
@@ -255,6 +296,12 @@ function agent.connect(port, opts) end
 ---@return agent.result
 function agent.run(prompt, port, opts) end
 
+--- A conversation: a fast talker in front, this agent behind it doing the work as
+--- background jobs (spec/speech.md). Callable, and the speech module too:
+--- `agent.speech { world = port }`, `agent.speech.talker { model = ... }`.
+---@type table|fun(cfg: { world: agent.port, workers: table|nil, talker: table|nil, job_world: table|function|nil, clock: function|nil, keep: integer|nil, jobs: integer|nil, job_budget: integer|nil, proactive: boolean|nil, settle: number|nil, relay: boolean|nil }): table
+agent.speech = {}
+
 ---@param port agent.port
 ---@param opts table|nil
 ---@return boolean, string[]|nil
@@ -270,6 +317,14 @@ function agent.problems() end
 function agent.spec() end
 
 -- the behaviour half ---------------------------------------------------------------------
+
+--- What the agent IS, from a feature file: the is lines of its Background applied to this
+--- agent, as the `agent.*` statements they name (spec/declare.md). Raises with the line on
+--- a file it will not read.
+---@param text string   the text of a .feature file
+---@param opts table|nil  { read = function (path) -> text } for a file a line names
+---@return table        the prefix
+function agent.declare(text, opts) end
 
 --- Run a feature file against this declaration, on the doubles.
 ---@param feature string   the text of a .feature file
@@ -333,6 +388,7 @@ agent.change = {}
 agent.cli = {}
 agent.compaction = {}
 agent.config = {}
+agent.declared = {}
 agent.double = {}
 agent.gherkin = {}
 agent.interpret = {}
@@ -348,6 +404,8 @@ agent.tools_fs = {}
 agent.trace = {}
 agent.tools_sh = {}
 agent.turn = {}
+--- The table a port yields to wait on the host, a sleep or the person (spec/speech.md).
+agent.wait = {}
 agent.work = {}
 
 ---------------------------------------------------------------- the interpretive layer

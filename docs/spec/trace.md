@@ -82,7 +82,7 @@ characters that is not in the vocabulary's string set.
 An eval that needs to see what actually came back reads `result.transcript`, which never
 leaves the process.
 
-*Test: `a_span_carries_no_payload`, in `rules-test.lua` beside the others.*
+*Test: `a_span_carries_no_payload`, in `scripts/rules-test.lua` beside the others.*
 
 ## The spans
 
@@ -176,7 +176,7 @@ proved it twice:
 * `gen_ai.system` is **gone** from the registry, replaced by `gen_ai.provider.name`. It
   was adopted here and never written, so the repair was a rename in the list and a line in
   `turn.lua` that writes the real thing. The provider is the declaration's own prefix —
-  `agent.model "openrouter:inception/mercury-2.5"` says `openrouter` — and a model id with
+  `agent.model "openrouter:z-ai/glm-5.3"` says `openrouter` — and a model id with
   no prefix gets **no attribute at all** rather than a default, because which provider a
   bare id belongs to is the host's question and answering it in the loop would be rule 1
   broken by a default instead of by a `require`.
@@ -198,8 +198,9 @@ repo ontology, each names a closed set or a number, and there is no free-text on
 | `malleable.stop` | one of `answered`, `budget`, `refused`, `error` |
 | `malleable.steps` | how many passes the turn took |
 | `malleable.budget` | the step budget it was given |
-| `malleable.gate.answer` | `allowed`, `refused`, `stopped`, `absent` |
+| `malleable.gate.answer` | `allowed`, `edited` (allowed with the person's changes), `refused`, `stopped`, `absent` |
 | `malleable.refused_by` | `gate`, `hook` or `error` |
+| `malleable.requirement` | `unmet` on a call a requirement stopped before it ran |
 | `malleable.unclosed` | true on a span the run had to close for it |
 | `malleable.calls` | tool calls in this span's subtree |
 | `malleable.act` | what a tool call DID, from the closed set in `spec/command.md`, sorted and comma-joined |

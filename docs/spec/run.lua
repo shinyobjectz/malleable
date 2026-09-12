@@ -1,13 +1,12 @@
 -- Every spec/*.feature, run against the tree vocabulary.
 --
--- One declaration holds every step: the thirty-six built-in expressions, which say what an
+-- One declaration holds every step: the forty-three built-in expressions, which say what an
 -- AGENT does, and the tree vocabulary in `spec/tree.lua`, which says what this TREE is.
 -- Two subjects, two vocabularies, one runner -- and one report, in which a promise nobody
 -- has built reads as UNDEFINED and prints the `agent.step` skeleton that would define it.
 --
--- That is the whole mechanism, and it is not new: `undefined` is not `failed` was built
--- into `behaviour.lua` long before anything needed it here. What is new is pointing it at
--- the specs, so an unmet promise is a number on every run instead of a bullet nobody reads.
+-- `undefined` is not `failed`, which `behaviour.lua` already encodes. Pointing it at the
+-- specs is what makes an unmet promise a number on every run rather than a bullet.
 
 local here = debug.getinfo(1, "S").source:match("^@(.*)[/\\][^/\\]*$") or "."
 local root = here .. "/.."
@@ -33,7 +32,8 @@ local FEATURES = {
   { "port",      false }, { "provider",  false }, { "schedule", false },
   { "skills",    false }, { "subagent",  false }, { "tools_fs", false },
   { "tools_shell", false }, { "turn",    false }, { "work",     false },
-  { "compaction",  false }, { "interpret-marks", false },
+  { "compaction",  false }, { "interpret-marks", false }, { "store", false },
+  { "ml",          false }, { "declare", false }, { "speech", false }, { "history", false },
 }
 
 -- A spec/*.md that is not on that list is a promise nothing counts. `tools/spec-check.sh`
@@ -44,9 +44,8 @@ local FEATURES = {
 
 --- Is this file the script a person typed, or was it required by the test suite?
 ---
---- Both, and that is deliberate. `tools/spec-check.sh` runs it for the report; the suite
---- requires it so the promises cannot rot in a script nobody remembers to call -- which
---- would be the same failure this whole file exists to stop, one level up.
+--- Both. `tools/spec-check.sh` runs it for the report; the suite requires it so the
+--- promises cannot rot in a script nobody remembers to call.
 local function is_main()
   local source = debug.getinfo(1, "S").source:sub(2)
   local named = type(arg) == "table" and arg[0] or nil

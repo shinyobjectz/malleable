@@ -14,11 +14,14 @@ sense:
     triage.lua        what the agent IS      — its name, its model, its tools, its gate
     triage.feature    what it DOES           — its behaviour, in Gherkin, and executable
 
+Or one file: since 2026-09-11 the feature may say what the agent is as well, in its
+Background, and then it is the whole agent (below, "One file, and an agent that edits it").
+
 The Lua half is a declaration: a surface that builds a table and runs nothing. The Gherkin
 half is the behaviour, written in prose by the person who wanted it, and executed without
 translation — the `Given` lines build the world, the `When` line runs the agent against it,
 the `Then` lines judge what came back. A feature that passes is documentation that was true
-this morning. `spec/gherkin.md` and `spec/behaviour.md` are the contract; the thirty-six
+this morning. `spec/gherkin.md` and `spec/behaviour.md` are the contract; the forty-three
 built-in step expressions cover the harness's own surface, so a declaration is verifiable
 with no glue code written at all.
 
@@ -46,7 +49,7 @@ typeaway.
 The surface, then, is a Lua declaration:
 
     agent.name  "reviewer"
-    agent.model "openrouter:inception/mercury-2.5"
+    agent.model "openrouter:z-ai/glm-5.3"
 
     agent.tool "read" {
       about = "Read a file",
@@ -62,7 +65,7 @@ no builder to close, no `return` ceremony — the file *is* the declaration.
 A port of Pi, or a coding agent at all. A coding agent is a product: a session store on
 disk, a scheduler holding threads, telemetry, a package manager. None of that is here.
 The one interface in the tree is `console/`, a host like any other: it lives beside the
-harness, and nothing under `src/` may require it (`spec/console.md`). (`agent.every` is not a scheduler: it states a beat and
+harness, and nothing under `src/` may require it (`spec/home.md`). (`agent.every` is not a scheduler: it states a beat and
 answers what is due. Nothing holds a thread, and no run starts unless a host asks.) What
 is taken from Pi is the ARCHITECTURE it makes legible — an agent, its tools, a turn loop,
 an approval gate, a session — in Lua, at the size Lua wants.
@@ -70,7 +73,7 @@ an approval gate, a session — in Lua, at the size Lua wants.
 Nor is the Gherkin half a port of Cucumber. Cucumber is a framework a project builds a
 step library on top of: everything is undefined until somebody writes the glue, and the
 glue is where the bugs live. Here the vocabulary that matters is **closed and built in** —
-thirty-six expressions over the harness's own nouns, which are the only nouns a harness
+forty-three expressions over the harness's own nouns, which are the only nouns a harness
 has — so the common case needs no glue at all, and `agent.step` exists for a domain rather
 than for the basics. There are no hooks, no tags that change execution, no world object a
 project subclasses, no reporters, no parallel runner and no plugin system. A feature is
@@ -158,7 +161,7 @@ how, and both halves drive in a test with nothing real attached.
   said what it did, so *"it reads the file, runs the suite, and asks before it files"* was
   a sentence this tree could only hold as a comment. It needs three things and all three
   are specified: a **reader** over the Gherkin subset (`spec/gherkin.md`), a **closed
-  vocabulary** of thirty-six step expressions over the harness's own nouns, and a
+  vocabulary** of forty-three step expressions over the harness's own nouns, and a
   **runner** that builds the world out of the `Given` lines and judges the `Then` lines on
   the result (`spec/behaviour.md`). No new port: the world a feature builds is
   `agent.world`, the doubles that were already there, which is why a scenario reaches no
@@ -327,7 +330,7 @@ does not exist, and the same test covers `interpret`. The file is checked in rat
 generated, because a generated one would document what the code happens to do rather than
 what it promised, and the promise is `spec/`.
 
-The Gherkin half of the same job is not a second file. The thirty-six expressions live in
+The Gherkin half of the same job is not a second file. The forty-three expressions live in
 `src/behaviour.lua` and nowhere else; `agent.steps()` answers them, `docs/STEPS.md` is
 rendered from them and never hand-edited, and `behaviour.check` is what an editor runs to
 tell a person that the step they just typed matches nothing and here is the stub for it.
@@ -486,3 +489,71 @@ protect, because stopping it is what fixing means.
 
 `spec/change.md` is the ruling, and it was written before the code, because a wall drawn
 afterwards is a wall drawn around whatever was built.
+
+## One file, and an agent that edits it
+
+Ruled 2026-09-11, and it changes two decisions above, so the reason is written here.
+
+**An agent may be one feature file.** The pair put what an agent is in the one language only
+someone who reads Lua could change, so an agent could not change itself in the language it is
+judged in, and a person could not give it a tool without Lua. Now the Background may say what
+the agent is, in a closed vocabulary — `the agent is called reviewer`, `it runs commands`,
+`the tool verdict asks first` — that compiles to exactly the table `agent.*` builds. The
+pair stays: a host building in code, and a body too long for a doc string, still want Lua,
+and `agent.declare(text)` joins the two halves in one declaration.
+
+`spec/behaviour.md` had said a feature must never write a declaration, because a generator
+that turned prose into one would make the test as reliable as the model. That argument is
+kept, and it is why this is safe: nothing reads the Background as English. Each is line
+matches one expression or the file is refused at load, the same line always builds the same
+table, and a test holds the vocabulary to the surface, entry point by entry point.
+
+**The wall follows reach, not a field list.** `spec/change.md` let an agent edit three
+fields. That was right about the danger — an agent that can edit its own gate has no gate,
+and one that can edit its test will pass it — and too narrow to build with. The two refusals
+it existed for stand, by name: an `asks first` line may be added and never removed, and an
+authored scenario is the person's. Everything between is sorted by what it does to reach: an
+edit that widens nothing the agent makes itself, scored against the authored scenarios; one
+that widens reach — a tool, a body, commands, another agent — goes to the person through the
+harness's own gate, as a tool with `ask = true`. So an agent can extend itself and build
+other agents, and every step past what it could already do is one a person said yes to.
+
+None of the eight rules moved. Rule 2 holds for a feature as for a Lua file: a doc string is
+compiled, never called. Rule 4 is how widening reaches the person. Rule 6 is why a shorthand —
+a line that stands for other lines, the vocabulary extended in Gherkin — may be given or then
+and never when. `spec/declare.md` is the contract.
+
+## A talker in front, jobs behind
+
+Added 2026-09-11, so that a developer can put a person in conversation with an agent,
+typed or spoken, without the agent's work setting the pace of the conversation.
+
+A spoken conversation has a budget a coding agent cannot meet: a person expects the first
+word within a second or so, and an agent that reads files, asks at its gate and checks its
+own work takes tens of seconds. One model cannot be both, so there are two layers. The
+**talker** is built for speed: a small brief, three steps, reasoning low, four tools, and
+no reach into the world at all. The **jobs** are built for the task: ordinary runs of the
+declared agents, under the same gates, budgets and worlds as any other run. The talker
+never does work, and a job never speaks. What a job found reaches the person only as the
+talker's words, from a report the talker is given with its facts exact.
+
+The rules that make this work are taken from the published two-layer designs (DeepMind's
+talker and reasoner, OpenAI's chat supervisor, LiveKit's asynchronous tools), and each was
+checked against a live run rather than taken on faith. The talker says something before it
+hands work off, because silence while a job starts reads as a failure. A person talking
+over the talker cuts the talker, never a job. A report waits for the floor to be free, and
+two reports that end together are one reply. A job's question is relayed, and `decide` is
+refused until the person has spoken since the question was put, so the talker cannot
+approve its own job's call.
+
+The transport is the harness's own. Each run is a coroutine, and a port that would block
+yields a wait instead: `host` with a poll, `sleep`, or `person` (`src/wait.lua`). That is
+the console's turn clock, so one conversation drives the talker and several jobs on one
+thread, and the same code runs turn-based in a terminal or realtime inside a 30-frame loop. Interruption is a
+coroutine that is no longer resumed, which is Hugging Face's `CancelScope` with nothing to
+check. The one new thing a run needed was a tool that **ends** it (spec/turn.md), so a reply
+that hands off stops at the hand-off rather than spending another call to say so.
+
+What was left out is written in `spec/speech.md`, "Where it came from": the Realtime
+server, direct audio into an audio model, and speculative turns, the last of which is the
+next thing to measure, because most of a spoken turn's time is the talker's call.

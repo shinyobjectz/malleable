@@ -148,3 +148,14 @@ different things does it do, and which*.
 * a repertoire over a model that always does one thing is one behaviour at rate 1; over one
   that alternates, two at 0.5, each re-runnable;
 * everything above under `lua` and under `luajit`.
+
+## A run still going (amended 2026-09-11, docs/spec/agent-file.md)
+
+`observe.live(record, name)` writes the scenario of a run so far, in the same lines as
+`observe.scenario` and from the same writers, so a live observation and a finished one
+agree line for line. The record carries `result`, with the calls made so far and `stop`
+nil while it runs, `prompt`, and `log`, the history's log of the files it wrote
+(spec/history.md), whose texts are the Then lines about files. The world it was given is
+not said: a live run's world is the real one. Once `stop` is set, the stop and the steps
+come first among the Then lines, as they do in a finished scenario. Answers the text and
+the gaps.

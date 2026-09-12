@@ -14,6 +14,11 @@ was true this morning.
 
     lua bin/malleable.lua --verify triage.lua
 
+Or one file. The feature's Background may say what the agent is, in a closed vocabulary of
+its own, and then the feature is the whole agent — which is also what lets an agent change
+itself, and build other agents, in the language it is judged in (below, "An agent in one
+file").
+
 ## The declaration
 
 You write what the agent is, what tools it has and when it must ask permission; the
@@ -25,7 +30,7 @@ builder to close, no `return` at the end of the file. The file *is* the declarat
     local agent = require "agent"
 
     agent.name  "reviewer"
-    agent.model "openrouter:inception/mercury-2.5"
+    agent.model "openrouter:z-ai/glm-5.3"
 
     agent.tool "read" {
       about = "Read a file",
@@ -47,7 +52,7 @@ no network client, and a file that declares rather than runs.
 
 Not a coding agent. A coding agent is a product — a session store on disk, a scheduler
 holding threads, telemetry, a package manager — and none of that is here. What it does have
-is a face: `console/` is a fantasy console where the carts are agents (`spec/console.md`).
+is a UI: `console/` is a window with an agent in it (`spec/home.md`).
 `agent.every` is not a scheduler: it states a beat and answers what is due, holds no
 thread, and starts no run unless a host asks. `DESIGN.md` locks the decisions and is the
 file to read first.
@@ -55,7 +60,7 @@ file to read first.
 ## The eight rules
 
 `DESIGN.md` locks eight architectural rules, and each one names a test in
-`rules-test.lua` that fails the moment the rule stops holding.
+`scripts/rules-test.lua` that fails the moment the rule stops holding.
 
 1. **The core knows no vendor.** `src/turn.lua` may not name a provider, an HTTP
    library, a filesystem or a clock. It takes a port table and calls it.
@@ -85,7 +90,7 @@ subprocess.
     local agent = require "agent"
 
     agent.name  "reviewer"
-    agent.model "openrouter:inception/mercury-2.5"
+    agent.model "openrouter:z-ai/glm-5.3"
     agent.budget(12)
 
     agent.system [[
@@ -294,6 +299,95 @@ is kept only if the rules still hold, nothing new fails, and no behaviour was lo
 
 `spec/change.md` is the ruling, and it was written before the code.
 
+## An agent in one file
+
+    Feature: greeter
+      Says hello to whoever it is asked to.
+
+      Background:
+        Given the agent is called greeter
+        And its model is "openrouter:z-ai/glm-5.3"
+        And it has a tool greet for "Say hello to someone.", which takes:
+          | argument | type   | about        |
+          | name     | string | who to greet |
+        And the tool greet does:
+          """lua
+          return "hello, " .. c.args.name
+          """
+
+      Scenario: it greets
+        Given the model calls greet with {"name": "ada"}
+        And the model answers "I said hello to ada."
+        When the agent is asked "greet ada"
+        Then the call to greet answers "hello, ada"
+
+    lua bin/malleable.lua --verify example/greeter.feature
+
+Each Background line is an **is line**, and each says one thing `agent.*` says: a name, a
+model, a briefing, the workspace, commands, a tool and its arguments, a gate, a store, a
+skill, a beat, a server, another agent to hand work to. Nothing reads them as English: a line
+matches one expression or the file is refused, and the file compiles to the same table the
+Lua would have built. A body that is code is Lua in a doc string, compiled with nothing but
+`c` to reach the world through. `lua bin/malleable.lua --steps` lists every line there is.
+
+A scenario tagged `@shorthand` adds a line to the vocabulary, in Gherkin: its name is the
+new line, its steps are what it means.
+
+The same file is the surface an agent edits. `it edits agents in "agents"` gives an agent
+six tools over the feature files there, and the wall is in their shape: an edit that widens
+nothing it makes with `edit`, scored against the scenarios a person wrote; one that reaches
+further — a tool, a body, commands, a new agent — it makes with `propose`, which asks the
+person first; an `asks first` line it may add and never remove; and a scenario it writes is
+`@proposed`, never scored, until a person accepts it. `example/builder.feature` states each
+side of that wall as a scenario, and runs. `spec/declare.md` is the contract.
+
+## An agent you can talk to
+
+    lua bin/malleable.lua --talk example/notebook.feature --root ~/notes
+    luajit console/ml/talk.lua --agent example/notebook.feature --root ~/notes
+
+A conversation has two layers. In front is a **talker**: a fast model (GLM 5.3, reasoning
+low, three steps) that answers each turn in a sentence or two and has four tools. With
+`hand_off` it gives work to an agent, which runs behind it as a **job**. With `jobs` it
+reads how they are going, with `cancel` it stops one, and with `decide` it answers a job's
+question once the person has. The jobs are ordinary runs of your agents, under their own
+gates and budgets. They run side by side in coroutines, and the talker keeps answering
+while they work. When one ends, the talker is told, and it says what came back in its own
+words, once the person is not speaking.
+
+The first command is turn-based: each line typed is a turn, and an empty line waits for the
+jobs and hears their reports. The second is realtime: the microphone, a VAD, a turn model
+and a transcript hear the person, the talker answers, and a TTS speaks, all in this tree's
+Lua (spec/ml.md). In Lua it is
+
+    local talk = agent.speech { world = world }
+    talk:heard("what do my notes say about the budget?")
+    -- each frame, or each line:
+    talk:update()
+    local sentence = talk:take()            -- say it, then talk:said()
+
+A talker call took about half a second, measured over OpenRouter on 2026-09-11. Spoken, the
+first audio came 1.1–2.2 s after the person stopped, and a job's report was spoken 3.5 s
+after the turn that asked for it. The ideas come from Hugging Face's speech-to-speech, and
+`spec/speech.md` is the contract, with the numbers.
+
+## The console
+
+    git clone https://github.com/shinyobjectz/malleable
+    love malleable/console --agent malleable/example/notebook.feature --root ~/notes
+
+One window with an agent in it. It needs [LÖVE 11.5](https://love2d.org) to show a window,
+and nothing else; with the ML engine built (`console/ml/build.sh`) it is spoken as well
+as typed. The screen is a stage above a bar: the bar is a grid of dots that lights grey
+while you are heard and in colour while the agent speaks, with the caption in its middle
+and the hints at its ends (`spec/home.md`); the stage is for the agent's own file with
+its state showing, which is the work in hand (`docs/agent-file-plan.md`). The talker in
+front answers in a sentence and hands work to jobs behind it (`spec/speech.md`). The
+console is a host like any other: `console/lib/` never names `love`, and `src/` never
+names the console. `scripts/ship.sh` packs it as `build/malleable.love`, one file that
+opens to an agent (`love build/malleable.love --agent a.feature --root D`); the voice
+needs `console/ml` on disk beside it.
+
 ## The surface
 
 Everything hangs off `agent`.
@@ -301,15 +395,20 @@ Everything hangs off `agent`.
 | | |
 | --- | --- |
 | `agent.name` `agent.model` `agent.system` `agent.budget` | what the agent is |
+| `agent.reasoning "low"` | how hard its model thinks before it answers: `none`, `low`, `medium`, `high`; unset, the model's own default |
 | `agent.trust` `agent.allow` `agent.deny` | its standing permission policy |
 | `agent.tool "x" { ... }` `agent.on "event" (fn)` | a tool, a hook |
+| `requires = { { says, check } }` `ask = { edit = "arg" }` `preview = true` | on a tool: what a call must meet before it runs, told to the model and repaired on its next step; what a person may change at the gate; whether a host may show its arguments first (spec/turn.md) |
 | `agent.step "the queue holds {string}" { ... }` | a step of your own, for a feature |
 | `agent.skill "x" { ... }` `agent.every "x" { ... }` `agent.uses "x" { ... }` | a procedure a person wrote, a beat, a server |
-| `agent.string` `agent.number` `agent.boolean` `agent.table` `agent.list` (and each with `_opt`) | argument types |
+| `agent.string` `agent.number` `agent.boolean` `agent.table` `agent.list` `agent.one_of` (and each with `_opt`) | argument types |
+| `agent.store "x" { about, columns, sort }` | a program's rows, which the host keeps; `c.store` in a tool body (spec/store.md) |
 | `agent.files` `agent.shell` `agent.plan` `agent.skills` `agent.delegate` | the toolkits: filesystem, shell, a plan, the skill reader, a child agent |
 | `agent.tick` `agent.due` `agent.connect` | run what the clock is owed; look first; reach the declared servers |
 | `agent.run` `agent.check` `agent.schema` `agent.problems` `agent.spec` | running it, and looking at it first |
 | `agent.verify` `agent.evaluate` `agent.check_feature` `agent.steps` | run a feature on the doubles; against a real model; check it without running; the vocabulary |
+| `agent.declare(text)` | what the agent is, from a feature's Background: the is lines, applied as the statements they name (spec/declare.md) |
+| `agent.speech { world }` | a conversation: a fast talker in front, this agent's runs behind it as jobs, turn-based or realtime (spec/speech.md) |
 | `agent.gate` `agent.bind` `agent.world` | an approval gate, the port it binds into, the doubles |
 | `agent.new` `agent.reset` | a second agent in one process; start this one over |
 
@@ -353,6 +452,17 @@ and starts at `agent.name`:
 `--dry-run` is the only door to the doubles; without it the runner asks the host for
 real ports and refuses to start if it has none.
 
+The host in `bin/world.lua` supplies them: a real model through OpenRouter (or OpenAI)
+over curl, the disk under `--root`, a yes/no on your terminal for the gate, and no shell
+at all. A command line a model wrote is not something this host runs by default, so every
+shell call comes back `denied`, as a result the model reads.
+
+    $ export OPENROUTER_API_KEY=...
+    $ lua bin/malleable.lua hello.lua "say hi"
+
+The key reaches curl through a temporary config file, never the command line, and
+`src/provider.lua` scrubs it from anything it reports.
+
 ## The parts
 
 | | |
@@ -374,19 +484,23 @@ real ports and refuses to start if it has none.
 | `src/skills.lua` | procedures the workspace keeps, briefed and read on request |
 | `src/schedule.lua` | the beat, and the ledger that keeps it from firing twice |
 | `src/mcp.lua` | tools that live in another process, made into tools that do not |
+| `src/declare.lua` | an agent written in Gherkin: the is lines, shorthands, and one edit classified by reach |
+| `src/kits.lua` | the toolkits, one definition for the prefix and the is lines |
+| `src/authoring.lua` | the six tools an agent edits feature files with, inside the wall |
 | `src/interpret.lua` | the forcing function for reading marks |
 | `src/gherkin.lua` | a feature file, read: the subset, the expressions, the pickles |
-| `src/behaviour.lua` | the thirty-six step expressions, and the runner over a declaration |
+| `src/behaviour.lua` | the forty-five step expressions, and the runner over a declaration |
 | `src/trace.lua` | the run's spans, rendered — to OTLP/JSON, or to a tree for a person |
 | `src/observe.lua` | a run, read back out as a scenario: the agreement and the repertoire |
 | `src/command.lua` | what a command line did, as a term, so the command itself never travels |
 | `src/shell.lua` | a shell, in Lua, over a filesystem in Lua: eighteen commands, no host |
 | `src/change.lua` | what a declaration may alter about itself, scored on a test it cannot edit |
+| `src/speech.lua` | a conversation: a fast talker in front, the agents' runs behind it as jobs |
 
 ## Running the tests
 
-    lua run-tests.lua          # every test/*_test.lua
-    lua rules-test.lua         # the eight rules of DESIGN.md
+    lua scripts/run-tests.lua   # every test/*_test.lua
+    lua scripts/rules-test.lua  # the eight rules of DESIGN.md
     lua spec/run.lua           # every spec/*.feature, against the tree itself
     lua example/reviewer.lua   # the worked example, end to end
     lua example/systems/02-a-beat-and-a-procedure.lua   # a beat, a skill, a ledger
@@ -394,9 +508,11 @@ real ports and refuses to start if it has none.
     lua bin/malleable.lua --verify hello.lua            # a declaration, from hello.feature
     lua bin/malleable.lua --steps                       # the built-in vocabulary
 
-`run-tests.lua` discovers every `test/*_test.lua`, calls each named function on the table
-it returns, prints a line per test and a tally, and exits non-zero on any failure. Pass a
-fragment of a filename to run one file: `lua run-tests.lua turn`.
+`scripts/run-tests.lua` discovers every `test/*_test.lua`, calls each named function on
+the table it returns, prints a line per test and a tally, and exits non-zero on any
+failure. Pass a fragment of a filename to run one file: `lua scripts/run-tests.lua turn`.
+Both runners find the tree from their own location, so the directory you call them from
+does not matter.
 
 No test touches the network, the disk (beyond reading the tree's own source), a
 subprocess or a real clock. Both suites pass under `lua` and under `luajit`.
@@ -439,4 +555,5 @@ No telemetry, no package manager, no daemon. There is no scheduler either:
 `agent.every` states a beat and `agent.tick` runs what is due, but nothing here has a
 thread, and no run starts unless a host asks for one. The harness is the loop, the tools
 and the gate; a host supplies the world and decides what to do with the result. The
-console (`console/`, `spec/console.md`) is one such host, shipped in the tree.
+console (`console/`, `spec/console.md`) is one such host, shipped in the tree, and
+`spec/programs.md` drafts the layer people build on it.

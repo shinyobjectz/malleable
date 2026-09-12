@@ -1,16 +1,19 @@
 -- The eight rules of DESIGN.md, each with the test it names.
 --
---     lua rules-test.lua
+--     lua scripts/rules-test.lua
 --
--- These are not the subsystem tests. test/ proves that each part does what its own
--- specification says; this file proves the eight things the whole tree promises, and each
--- test here is written to FAIL the moment its rule stops holding.
+-- Not the subsystem tests: test/ proves each part does what its own specification says,
+-- this file proves the eight things the whole tree promises, and each test here is written
+-- to FAIL the moment its rule stops holding.
 --
 -- Rules 1, 2 and 7 are checked by reading a source file as text, because they are claims
 -- about what a file does not contain and no run can prove an absence. The rest are
 -- checked by running the harness.
 
-local here = debug.getinfo(1, "S").source:match("^@(.*)[/\\][^/\\]*$") or "."
+-- This file lives in `scripts/`, so the tree is its parent. Derived from the script's own
+-- location rather than the working directory, so it runs from anywhere.
+local at   = debug.getinfo(1, "S").source:match("^@(.*)[/\\][^/\\]*$") or "."
+local here = at .. "/.."
 package.path = here .. "/?.lua;" .. here .. "/src/?.lua;" .. package.path
 
 local agent = require "agent"
@@ -44,7 +47,6 @@ local function an_agent()
   return a
 end
 
--- ===========================================================================
 -- Rule 1. The core knows no vendor.
 --
 --   src/turn.lua may not name a provider, an HTTP library, a filesystem or a clock.
@@ -96,7 +98,6 @@ rule(1, "core_names_no_vendor", function ()
   assert(result.calls[1].output == "42", tostring(result.calls[1].output))
 end)
 
--- ===========================================================================
 -- Rule 2. A declaration cannot run anything.
 --
 --   src/spec.lua builds a plain table and never calls a tool body, a model or a hook.
@@ -150,7 +151,6 @@ rule(2, "loading_runs_no_body", function ()
   assert(blocked == nil, "a declaration reached io")
 end)
 
--- ===========================================================================
 -- Rule 3. A tool is a name, a why, typed arguments and a body.
 --
 --   Nothing else is required and nothing else is read. A tool with no `about` is
@@ -211,7 +211,6 @@ rule(3, "a_tool_states_what_it_is_for", function ()
   end
 end)
 
--- ===========================================================================
 -- Rule 4. Permission is the harness's, never the tool's.
 --
 --   `ask = true` means the port is asked before the body runs, and a refusal is a
@@ -289,7 +288,6 @@ rule(4, "a_refused_call_is_a_result_the_model_reads", function ()
   assert(saw.context.model == nil, "a tool body can reach the model")
 end)
 
--- ===========================================================================
 -- Rule 5. The loop always ends.
 --
 --   Every run has a step budget. Reaching it ends the turn with a stated reason,
@@ -484,9 +482,7 @@ end)
 -- Rule 8. No span attribute carries a payload.
 --
 --   A trace carries names, counts, sizes, durations, decisions and codes -- never a
---   prompt, a model's text, a file's contents, a tool's arguments or its output. A trace
---   exporter's whole job is to send what it is given somewhere else, and an agent's
---   arguments are the most sensitive bytes in the process.
+--   prompt, a model's text, a file's contents, a tool's arguments or its output.
 
 rule(8, "a_span_carries_no_payload", function ()
   local trace  = require "trace"
@@ -573,7 +569,6 @@ rule(8, "a_span_carries_no_payload", function ()
   assert(seen["malleable.stop"], "the run span was never closed")
 end)
 
--- ===========================================================================
 
 local passed, failed = 0, 0
 for _, entry in ipairs(ORDER) do

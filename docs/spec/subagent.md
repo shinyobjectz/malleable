@@ -502,8 +502,11 @@ single result.
   started. Stated as a limit rather than papered over — a parent's own runaway is rule
   5's business and `turn`'s budget already ends it.
 - **It must not run two children at once.** Lua here is single-threaded and there is no
-  scheduler in this tree. A child runs to completion before its caller continues. Any
-  future concurrency is a change to this file first.
+  scheduler in this tree. A child runs to completion before its caller continues. Hosts
+  overlap I/O through the wait table (`src/wait.lua`, spec/speech.md): a port yields
+  `host`, `sleep` or `person`, and a pump resumes it. That is not two children at once.
+  Any future fan-out of children is a change to this file first, then to an isolated
+  child world (the host's `world` function), never to parallel tools that share one `fs`.
 
 ## 7. The tests that would prove it
 

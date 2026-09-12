@@ -303,7 +303,7 @@ approve    ask                        builtin
 budget     24                         builtin
 key        (secret, set)              env PI_API_KEY
 log_level  debug                      env PI_LOG_LEVEL
-model      openrouter:inception/mercury-2.5   file:.malleable/agent.conf line 3
+model      openrouter:z-ai/glm-5.3   file:.malleable/agent.conf line 3
 timeout    120                        profile:review@.malleable/agent.conf line 18
 ```
 
@@ -384,7 +384,7 @@ hostile with.
 
 ```
 -- a comment runs to the end of the line
-model   = openrouter:inception/mercury-2.5
+model   = openrouter:z-ai/glm-5.3
 budget  = 12
 tools   = read, write, shell
 message = "  leading space kept, \"quoted\", and a literal \n"

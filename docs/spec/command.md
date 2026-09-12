@@ -112,6 +112,13 @@ for it, and no token count says so.
 
 `acts` is what the shell tool calls. `unplaced` is the number that goes on the report.
 
+The table of programs is partial on purpose, and widened only after reading a report.
+Widened 2026-09-11 from the long-task eval (`evals/long-task.feature`), where every
+install, test and build the model ran was unplaced: `npm i`, `npm add` and `npm uninstall`
+install; `npm init` and `npm pkg` write; `npx <program>` and `npm exec <program>` are named
+by the program, exactly as that program is on its own (`npx vitest run` tests, `npx tsc
+--noEmit` builds). `node <script>` stays unplaced: a script is a script.
+
 ## What it must NOT do
 
 * **Evaluate anything.** No expansion, no substitution, no glob, no arithmetic, no

@@ -104,7 +104,7 @@ were part of the name.
 | `the model answers {string}` | `model`, appended in order |
 | `the workspace keeps a skill {string}:` + doc string | `skills` |
 | `{word} last ran on {string}` | `ledger` |
-| `the server {word} offers {word}, which answers {value}` | `mcp` |
+| `the server {word} offers {word} and it answers {value}` | `mcp` (said without a comma after the name: a `{word}` reads to the next space) |
 | `the budget is {int}` | the run's options |
 
 The model's script is *ordered*, and the order is the order the lines appear in the file.
@@ -142,6 +142,7 @@ refused. It is the one `When` that reaches no port at all.
 | `the human is asked about {word}` | the gate's record |
 | `it takes {int} step(s)` | `result.steps` |
 | `it takes at most {int} step(s)` | `result.steps` |
+| `no beat is due` | after `the clock strikes`: nothing ran, every beat held or not yet due |
 | `the file {string} holds:` + doc string | the world's `fs`, after |
 | `nothing is written` | the world's `fs`, after |
 | `it notes {string}` | `result.notes`, containing |
@@ -163,7 +164,10 @@ refused. It is the one `When` that reaches no port at all.
 | `it runs no command that {word}` | and no shell call did |
 
 `{word}` is one of the eleven terms in `spec/command.md`, and a line naming anything else
-**fails with the list**, rather than passing vacuously because nothing matched.
+**fails with the list**, rather than passing vacuously because nothing matched. A call the
+gate or a hook refused ran nothing, and neither line counts it: a refused `git push` is the
+gate working, and `it runs no command that publishes` holds (found by `showcase/06-commands.feature`,
+2026-09-12).
 
 These two are the only place in the vocabulary that reaches inside a tool's arguments, and
 they are the reason a shell-first agent is sayable at all. `it calls shell` says a tool was
@@ -201,7 +205,7 @@ wrote three lines above it, on purpose, in this file.
 
 ## agent.step — the workspace's own vocabulary
 
-The thirty-six cover the harness. They cannot cover a domain, and a feature about a
+The forty-three cover the harness. They cannot cover a domain, and a feature about a
 triage agent wants to say `Given the queue holds a ticket from "ops"`. So a declaration may
 add steps, curried exactly like a tool, because a reader who understands one understands
 the other:
@@ -304,7 +308,35 @@ and it belongs in CI. `--eval` runs **the same file** against a real model throu
 the host supplies, k times per scenario, and answers a **rate**.
 
     lua bin/malleable.lua --verify triage.lua              -- deterministic, no world
-    ta-harness --eval triage.lua --samples 20              -- a real model, a rate
+    luajit scripts/eval.lua evals/notebook.feature --samples 5   -- a real model, a rate
+
+There is no `--eval` flag on the runner; `scripts/eval.lua` is the eval (`--model ID` puts
+the real model in place of the one the feature names, so a file written for the doubles
+runs unchanged), built from the same pieces (`declare.apply`, `cli.drivers`, `behaviour.run` with `eval = { samples, model }`),
+with the real model from `OPENROUTER_API_KEY` and a scratch root with no history. The evals
+the console's agents are measured by live in `evals/`, the talker's in `scripts/eval-talk.lua`,
+and the findings in `docs/eval-report.md`.
+
+### The long task: a real shell, a real folder, hours
+
+`scripts/eval-long.lua FEATURE --only NAME [--root DIR] [--hours H] [--journal FILE] [--out FILE]`
+runs one scenario with the world real all the way down: the real model, a real folder,
+and a real shell (`bin/subshell.lua`, `docs/spec/subshell.md`), with the network open. It
+is the one place the harness runs commands a model wrote, and the decisions that makes are
+the script's, in writing at its head: the child gets `PATH` and a `HOME` under the root and
+no key; every gate is approved and journalled, because nobody is there; a wall-clock cap
+ends the run by answering the next model call `unavailable`; the folder is kept.
+
+The scenario's Then lines are the same checks as anywhere else, on the result: the stop,
+the kinds of command it ran (`it runs a command that tests`), and the kinds it never ran
+(`publishes`, `escalates`). What it made is judged afterwards by the thing itself, never by
+a model: the script runs `npm test`, `npm run build` and `npm run lint` in the folder and
+records the exit codes, the files, the lines of TypeScript and the size on disk. A journal
+line an event (each model call with the seconds it took, the estimated size of the
+transcript sent and the tools it asked for; each command with its exit and seconds; each
+gate) is what a person follows during the hours, and what says where a run went wrong.
+`evals/long-task.feature` is the feature: a short scenario that proves the pipe in minutes,
+and one that asks for a whole program.
 
 This is the standard this subsystem exists to make possible, and it is worth stating as a
 claim rather than a feature: **an agent's effectiveness is the rate at which it does what
@@ -364,10 +396,11 @@ says a thing is broken without saying where.
 
 ## What it must NOT do
 
-* Write a declaration, or any part of one, from a feature. Gherkin states behaviour and
-  validates it; what the agent *is* stays in Lua, where a tool body belongs. A generator
-  that turned prose into a declaration would put a model in the loop of running a test, and
-  the test would then be as reliable as the model.
+* Put a model between a feature and the declaration it states. Since 2026-09-11 a feature
+  may say what the agent is (`spec/declare.md`), and it says it in a closed vocabulary that
+  compiles deterministically to the table `agent.*` builds; the argument this bullet carried
+  -- that a generator turning prose into a declaration would make the test as reliable as the
+  model -- is kept, and is why the is lines are expressions and never read as English.
 * Reach a real port under `--verify`. There is no door to one. `--eval` reaches exactly
   one — the model — and reaches it through the host, which is the only thing that has a
   model to give; the filesystem, the shell, the clock and the gate stay doubles in both
@@ -378,7 +411,7 @@ says a thing is broken without saying where.
 
 ## The tests that would prove it
 
-* each of the thirty-six expressions, once, matching and building or reading what it says;
+* each of the forty-three expressions, once, matching and building or reading what it says;
 * a given context has no `result`; a then context's world raises on a write, by name;
 * a declared step in the `given` slot cannot see a result, and one in `then_` cannot write;
 * a declared step colliding with a built-in is refused, naming both;

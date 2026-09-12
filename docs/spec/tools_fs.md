@@ -31,7 +31,7 @@ a reader who understands one understands the other.
     local tools_fs = require "tools_fs"
 
     agent.name  "reviewer"
-    agent.model "openrouter:inception/mercury-2.5"
+    agent.model "openrouter:z-ai/glm-5.3"
 
     tools_fs.install(agent, { root = "/w/project", port = host_port })
 

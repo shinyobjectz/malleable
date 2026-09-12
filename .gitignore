@@ -1,1 +1,14 @@
 .DS_Store
+dist/
+# the ML engine's ggml, fetched at a pinned commit by console/ml/fetch-ggml.sh, and its builds
+console/ml/ggml/
+console/ml/miniaudio/
+console/ml/build*/
+console/ml/models/
+console/ml/lib/
+# the runs a workspace keeps (docs/spec/history.md)
+.malleable/
+# stray outputs
+a.out.js
+a.out.wasm
+build/

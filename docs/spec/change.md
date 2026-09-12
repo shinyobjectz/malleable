@@ -9,7 +9,7 @@ whatever was built.
 The harness now measures itself well enough to improve itself. `--eval` gives a rate over
 k samples; `observe` gives what actually happened, as Gherkin; `agreement` gives stated
 against observed; `gaps` give what the vocabulary could not say, as a count that only goes
-down; `rules-test.lua` gives eight invariants. Those are a fitness function and a
+down; `scripts/rules-test.lua` gives eight invariants. Those are a fitness function and a
 constraint set, and both already exist.
 
 So the loop is small:
@@ -42,6 +42,14 @@ agent's behaviour lives in what it is told, what it may reach for, and when it m
 All three are in the declaration. If a change to the harness turns out to be needed, that
 is a finding for a person, and it should arrive as a **gap** — the same shape every other
 thing this tree cannot yet say arrives in.
+
+## The field list, and the wall that followed it
+
+The field list below is `change.propose`'s, on a declaration table, and it stands. An agent
+written in Gherkin meets a wider wall, drawn by **reach** rather than by field, in
+`spec/declare.md`: an edit that widens nothing it may make, one that widens reach goes to the
+person, and the two things this file refuses by name — an agent's own gate, and the authored
+feature file — are refused there by name too.
 
 ## What is editable, exactly
 
@@ -79,7 +87,7 @@ A proposal is kept only if **all three** hold. Each is a measurement, not a revi
 
 1. **the rules still hold** — passed in as `opts.rules`, a function the host supplies.
    Not run here, and that is the same seam as the model rather than a dodge:
-   `rules-test.lua` is a *script*, running it means loading a file, and this module reads
+   `scripts/rules-test.lua` is a *script*, running it means loading a file, and this module reads
    no file and writes none, which is what lets it be tested without either. A rules check
    that **raises** is a refusal, not a pass — a gate that cannot run is not a gate that
    held. With no `opts.rules` at all every decision says so in its own sentence, because
