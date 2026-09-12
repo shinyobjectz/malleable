@@ -790,4 +790,41 @@ function T.an_unknown_option_is_caught_at_construction()
     "while the three it takes are fine")
 end
 
+
+-- ------------------------------------------------------------------ 53-54, a question trust cannot waive
+
+function T.always_is_asked_under_trust_and_under_an_allow_policy()
+  -- §2.3, amended 2026-09-12: `always` goes from the memory straight to the port.
+  local port = spy("no")
+  local gate = approval.new { port = port, trust = "trusted" }
+  local d = shaped(gate:check { tool = "mode", args = { to = "writing" }, ask = true, always = true })
+  assert(d.allowed == false and d.source == "port" and d.asked == true, d.source .. " " .. d.reason)
+  assert(#port.asks == 1 and port.asks[1].tool == "mode", "the port was asked")
+  d = shaped(gate:check { tool = "mode", args = { to = "writing" }, ask = true })
+  assert(d.allowed and d.source == "trust", "without always, trust answers: " .. d.source)
+  assert(#port.asks == 1, "and the port is not asked")
+
+  port = spy("yes")
+  gate = approval.new { port = port, policy = { { allow = true, tool = "mode" } } }
+  d = shaped(gate:check { tool = "mode", args = {}, ask = true, always = true })
+  assert(d.allowed and d.source == "port" and d.asked == true, d.source)
+  d = shaped(gate:check { tool = "mode", args = {}, ask = true })
+  assert(d.allowed and d.source == "policy", "without always, the policy answers: " .. d.source)
+  assert(#port.asks == 1, "one question in all")
+end
+
+function T.always_still_loses_to_a_deny_and_to_a_never()
+  local port = spy("yes")
+  local gate = approval.new { port = port, trust = "trusted", policy = { { deny = true, tool = "mode" } } }
+  local d = shaped(gate:check { tool = "mode", args = {}, ask = true, always = true })
+  assert(d.allowed == false and d.source == "policy" and #port.asks == 0, d.source)
+
+  port = spy(function () return "never" end)
+  gate = approval.new { port = port, trust = "trusted" }
+  d = shaped(gate:check { tool = "mode", args = { to = "x" }, ask = true, always = true })
+  assert(d.allowed == false and d.source == "port" and d.remembered, d.source)
+  d = shaped(gate:check { tool = "mode", args = { to = "x" }, ask = true, always = true })
+  assert(d.allowed == false and d.source == "memory" and #port.asks == 1, d.source)
+end
+
 return T

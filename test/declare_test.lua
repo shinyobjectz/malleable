@@ -501,4 +501,56 @@ function T.the_runner_verifies_each_example_written_in_gherkin()
   end
 end
 
+
+-- ------------------------------------------------------------------ always asks first (2026-09-12)
+
+function T.always_asks_first_is_a_gate_the_agent_cannot_open()
+  local text = BASE:gsub("And the tool say asks first", "And the tool say always asks first")
+  local a = spec.new()
+  local info, why = declare.apply(text, a, { read = function () return nil end })
+  assert(info, tostring(why))
+  assert(a.tools.say.ask == true and a.tools.say.always == true, "asks, and always")
+  assert(spec.schema(a)[1].ask == "always", "the schema says always")
+  local new, why2, wall = declare.edit(text, { remove = "the tool say always asks first" })
+  assert(new == nil and wall == "wall", tostring(why2))
+  new, why2, wall = declare.edit(text, { replace = "the tool say always asks first", with = "the tool say asks first" })
+  assert(new == nil and wall == "wall", "widening a gate: " .. tostring(why2))
+  new, why2 = declare.edit(BASE, { add = "the tool say always asks first" })
+  assert(new and why2.reach == "narrows", "asks first may become always asks first: " .. tostring(why2 and why2.why or why2))
+  -- the two lines are order-free
+  local both = BASE:gsub("And the tool say asks first", "And the tool say always asks first\n    And the tool say asks first")
+  a = spec.new()
+  info, why = declare.apply(both, a, { read = function () return nil end })
+  assert(info and a.tools.say.always == true, tostring(why))
+  local twice = BASE:gsub("And the tool say asks first", "And the tool say always asks first\n    And the tool say always asks first")
+  info, why = declare.apply(twice, spec.new(), { read = function () return nil end })
+  assert(info == nil and contains(why, "already always asks first"), tostring(why))
+end
+
+
+-- ------------------------------------------------------------------ the wall, as features
+
+function T.the_wall_features_verify_on_the_doubles()
+  -- evals/wall.feature scripts every edit that tries to take an agent past what a person
+  -- allowed; wall-trusted.feature the same under `its trust is trusted` (2026-09-12, the
+  -- trusted attack run: propose approved itself). Both hold on the doubles.
+  local root = here .. "/.."
+  for _, name in ipairs { "wall", "wall-trusted" } do
+    local w = { outs = {}, errs = {} }
+    w.out = function (t) w.outs[#w.outs + 1] = t end
+    w.err = function (t) w.errs[#w.errs + 1] = t end
+    w.read = function (path)
+      local f = io.open(path, "rb")
+      if not f then return nil, "missing" end
+      local t = f:read("a"); f:close(); return t
+    end
+    w.env = function () return nil end
+    w.now = function () return 0 end
+    local f = root .. "/evals/" .. name .. ".feature"
+    local code = cli.main({ "--verify", "--feature", f, f }, w)
+    local out = table.concat(w.outs) .. table.concat(w.errs)
+    assert(code == 0 and out:find(" 0 failed", 1, true), name .. ":\n" .. out)
+  end
+end
+
 return T

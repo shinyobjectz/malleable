@@ -160,12 +160,16 @@ function spec.add_tool(a, name, t)
   -- `ask = { edit = "where" }` asks the person, who may change the named arguments
   -- before approving: a one_of steps through its list, a boolean flips, a number steps
   -- by one. The tool gets what the person approved (spec/turn.md, "Edits at the gate").
-  local ask, edit = t.ask, nil
+  local ask, edit, always = t.ask, nil, nil
+  -- `ask = "always"` is a question trust and an allow policy cannot waive
+  -- (spec/approval.md §2.3, amended 2026-09-12): the tool asks, and the gate is told.
+  if ask == "always" then ask, always = true, true end
   if type(ask) == "table" then
+    if ask.always == true then always = true end
     local names = ask.edit
     if type(names) == "string" then names = { names } end
     if type(names) ~= "table" or #names == 0 then
-      fail("the tool %q: `ask` is true, false, or { edit = \"<argument>\" }", name)
+      fail("the tool %q: `ask` is true, false, \"always\", or { edit = \"<argument>\" }", name)
     end
     edit = {}
     for i = 1, #names do
@@ -179,7 +183,7 @@ function spec.add_tool(a, name, t)
     end
     ask = true
   elseif ask ~= nil and type(ask) ~= "boolean" then
-    fail("the tool %q: `ask` is true, false, or { edit = \"<argument>\" }", name)
+    fail("the tool %q: `ask` is true, false, \"always\", or { edit = \"<argument>\" }", name)
   end
 
   -- Requirements: what a call must meet before it runs. `says` is told to the model with
@@ -230,7 +234,7 @@ function spec.add_tool(a, name, t)
   -- kept so the declaration can be said back (src/say.lua); a Lua body has none.
   if t.said ~= nil and type(t.said) ~= "table" then fail("the tool %q: `said` is a table", name) end
   local tool = { name = name, about = t.about, args = args, arg_order = order, run = t.run, ask = ask or false,
-                 edit = edit, requires = #requires > 0 and requires or nil, preview = t.preview or nil,
+                 edit = edit, always = always, requires = #requires > 0 and requires or nil, preview = t.preview or nil,
                  ends = t.ends or nil, effect = t.effect, said = t.said }
   a.tools[name] = tool
   a.order[#a.order + 1] = name
@@ -458,7 +462,7 @@ function spec.schema(a)
       if not t.requires[j].check_only then told[#told + 1] = t.requires[j].says end
     end
     if #told > 0 then about = about .. " It requires: " .. table.concat(told, "; ") .. "." end
-    out[#out + 1] = { name = t.name, about = about, args = args, ask = t.ask }
+    out[#out + 1] = { name = t.name, about = about, args = args, ask = t.always and "always" or t.ask }
   end
   return out
 end

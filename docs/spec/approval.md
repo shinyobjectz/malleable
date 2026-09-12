@@ -112,6 +112,7 @@ The whole of the subsystem's runtime behaviour. **It never raises and never retu
 | `tool`     | string          | required, non-empty. |
 | `args`     | table or `nil`  | the arguments the model supplied. `nil` reads as `{}`. |
 | `ask`      | boolean or `nil`| the tool's declared `ask` flag. `nil` reads as `false`. |
+| `always`   | boolean or `nil`| the tool declared `ask = "always"`: its question cannot be waived (amended 2026-09-12, below). `nil` reads as `false`. |
 | `reason`   | string or `nil` | why the model says it wants this. Passed to the port verbatim, truncated to 400 characters. |
 | `deadline` | number or `nil` | passed to the port untouched. The gate has no clock and enforces nothing (§3.9). |
 
@@ -138,6 +139,17 @@ The whole of the subsystem's runtime behaviour. **It never raises and never retu
    it. An `ask` of `1` or `"false"` therefore asks.
 8. **Ask the port** (§2.6). Trust `"none"` reaches this step for *every* tool, whatever
    its flag. No port here means a denial (§3.1).
+
+**A question trust cannot waive** (amended 2026-09-12). A call with `always = true` skips
+steps 5, 6 and 7 and goes from step 4 to step 8: an allow policy does not answer it, a
+trusted workspace does not answer it, and it is asked whatever `ask` says. Steps 1 to 4
+still run, so a deny policy still wins and a `never` the person gave this run still
+holds. What *does* answer it is a person: the port, a `--yes` or `--no` on the command
+line (those are the person's standing word, handed to the port), and an `always` the
+person answered earlier this run, which is step 4. The decision is the port's, exactly
+as at step 8, with the same sources. The mode tool of the modes kit
+(`docs/spec/modes.md`) is the first tool that declares it: a state machine the person
+moves is a sentence if `its trust is trusted` moves it.
 
 **The decision.** A fresh table each call, safe for the caller to keep:
 
@@ -592,3 +604,10 @@ is a claim the next edit can delete for free.
     **(A)** — determinism, and the host's memory layout staying out of the context.
 52. `an_unknown_option_is_caught_at_construction` — `{ policies = ... }` raises and names
     the typo. **(A)** — §2.1's last clause.
+53. `always_is_asked_under_trust_and_under_an_allow_policy` — `always = true` with
+    `trust = "trusted"`, and again with a matching allow policy: the port is asked and
+    its answer is the decision; with `always` absent the same calls are allowed without
+    a question. **(A)** — the 2026-09-12 amendment to §2.3.
+54. `always_still_loses_to_a_deny_and_to_a_never` — `always = true` with a matching deny
+    policy is denied without asking; after a `never` for its key it is denied from
+    memory. **(A)** — steps 3 and 4 run before the question.

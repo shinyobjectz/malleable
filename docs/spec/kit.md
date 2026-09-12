@@ -88,6 +88,10 @@ Rules of the shape, each refused by name at load:
 * `steps` is a list, possibly empty, of `{ expr, given }` or `{ expr, then_ }`, the shape
   `agent.step` takes, and each is checked as `agent.step` checks it (one phase, no when).
 * `says` is optional, a function of `told` answering a list of line texts.
+* `rails` (added 2026-09-12) is optional, a list of feature paths beside the kit file: the
+  doubles scenarios its rail survives, below. A kit whose `install` sets a hook and names
+  no `rails` is refused at use, by name. `delegate` says what a delegate under the kit
+  starts with, `"fresh"` or `"inherit"`, and a kit that names `rails` must say it.
 
 Nothing else is read. A kit file is compiled with what a body gets (`docs/spec/declare.md`,
 "Lua in a doc string"): `pairs`, `string`, `table`, `math` and the rest, no `io`, no `os`,
@@ -148,6 +152,32 @@ needs one too. What the wall cannot check is whether the kit told the truth abou
 reach; that is the kit author's word, which is the same word the harness takes from a Lua
 body. The line the wall holds is that reach is declared per line and never inferred.
 
+## What a rail must survive
+
+A hook is a rail: a `call` hook that refuses, a `start` hook that sets state. Every fault
+the modes kit had on 2026-09-12 was found by a real-model run and none by the doubles,
+because the doubles ran one agent per scenario and the faults needed two users of the kit
+in one process, a nested run, or a scenario that ran nothing. So a kit that carries a
+rail ships the scenarios that would have found them, named in `rails`, verified on the
+doubles by `test/kit_test.lua`, and each is a scenario, not a sentence:
+
+| the rail survives | the scenario |
+| --- | --- |
+| two users of the kit in one process, one running inside the other | an author in the kit verifies a notebook in the kit, then acts on its own state |
+| a nested run | the same: the Then line reads the outer agent, not the nested one |
+| a check-only scenario | a given that asks for state, `When the declaration is loaded`, then a run that starts clean |
+| a delegate | a helper under the kit does what its own file says, and `delegate` states which |
+| trust trusted | `its trust is trusted`, and the rail holds |
+| an always-allow policy | `it may always call <tool>`, and the rail holds |
+| a deny policy | `it may never call <tool>`, and what that pins is stated |
+| a beat | a run a beat starts is a run, and starts as one (for a kit with `every`) |
+
+The rule that goes with the list, in `docs/spec/behaviour.md`: every fault a real run
+finds becomes a doubles scenario first, and the fix second. The first draft of the modes
+kit is kept as `test/fixtures/modes-v1.lua` and fails `evals/modes-rails.feature` on
+the two-users case and the check-only case, which is the proof the scenarios find what
+the run found.
+
 ## Said back
 
 `say.render` says a used kit back as the lines that used it, verbatim, when it came from a
@@ -181,9 +211,22 @@ file.
   same declaration; used from Lua, `says` gives the lines and a kit without `says` is one
   unsaid sentence;
 * `showcase/20-kits.feature` verifies (`test/showcase_test.lua` already holds every
-  showcase).
+  showcase);
+* every kit under `library/` and `showcase/kits/` loads; one that names `rails` says
+  `delegate`, and each rail feature verifies on the doubles; a kit that sets a hook and
+  names no rails is refused by name, and one that names rails without `delegate` is too;
+* the first draft of the modes kit, swapped in for the real one, fails the rails feature
+  on the two-users scenario and the check-only pair;
+* every copy of a library kit embedded in an eval matches the library file
+  (`scripts/embed-kits.lua` rewrites them).
 
 ## Corrections, made while building it
+
+* A kit embedded in an eval as a doc string (the notebook an author verifies is read
+  through the doubles' filesystem) drifts from the library file, and the registry then
+  refuses the nested load as a second kit of one name: every nested verify fails. Found
+  by the first run of `evals/modes-rails.feature`, 2026-09-12; `scripts/embed-kits.lua`
+  rewrites the copies and `test/kit_test.lua` holds them equal.
 
 * A kit records its stores and its steps on the agent as well as its tools: the first
   rendering said a kit's store back as `it keeps a store`, which applied again declared it

@@ -3,7 +3,7 @@
 GENERATED from `src/behaviour.lua` by `lua bin/malleable.lua --steps --heading > docs/STEPS.md`. Never hand-edited: an expression is added in one place, and this is a rendering of it.
 
 ```
-The built-in vocabulary: 87 expressions, version 1; the is phase, version 1.
+The built-in vocabulary: 88 expressions, version 1; the is phase, version 1.
 
 is -- the agent, in the Background
   the agent is called {word}                                 its name  (widens)
@@ -26,6 +26,7 @@ is -- the agent, in the Background
   it has a tool {word} for {string}                          a tool with no arguments  (widens)
   it has a tool {word} for {string}, which takes:            a tool and its arguments; | argument | type | about |  (widens)
   the tool {word} asks first                                 the person is asked before it runs  (narrows; a gate, never removed by an agent)
+  the tool {word} always asks first                          the person is asked whatever the trust and whatever a policy allows  (narrows; a gate, never removed by an agent)
   the tool {word} asks first, letting the person change {word} and the person may change that argument at the gate  (narrows; a gate, never removed by an agent)
   the tool {word} is for {string}                            what the model is told a tool is for
   the tool {word} shows its call before it runs              a host may draw the call first

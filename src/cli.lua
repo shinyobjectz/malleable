@@ -1065,6 +1065,19 @@ function cli.wire(opts, world, agent)
     end
   end
 
+  -- Trust answers every question but one: a tool that always asks is still asked
+  -- (spec/approval.md §2.3, amended 2026-09-12). A person who set trust for convenience
+  -- reads here what trust does not cover, rather than at the first question.
+  if trust == "trusted" and type(agent) == "table" and type(agent.order) == "table" then
+    for i = 1, #agent.order do
+      local t = agent.tools[agent.order[i]]
+      if type(t) == "table" and t.always then
+        warnings[#warnings + 1] = "trust: the tool " .. tostring(agent.order[i])
+          .. " always asks first, and trusted does not answer its question"
+      end
+    end
+  end
+
   -- A policy on a tool that never asks reads as safety and provides none, exactly as
   -- a policy on a tool that does not exist does. cli.problems refuses that one; this
   -- entry is well formed and cannot be refused, so it is said out loud instead.
@@ -1138,6 +1151,7 @@ function cli.bind(p, gate, opts)
       tool   = type(q) == "table" and q.tool or nil,
       args   = type(q) == "table" and q.args or nil,
       ask    = true,
+      always = type(q) == "table" and q.always == true or nil,
       reason = type(q) == "table" and q.about or nil,
     })
     if not ok or type(d) ~= "table" then
@@ -1465,7 +1479,7 @@ function cli.plan(agent, opts, p, gate)
     -- the gate about one and printing the answer would be a plan that says the
     -- opposite of the run. What is reported is what will happen: it runs, ungated,
     -- and no policy and no trust setting is consulted before it does.
-    if schema[i].ask ~= true then
+    if not schema[i].ask then
       plan.gate[i] = {
         tool      = schema[i].name,
         asks      = false,
@@ -1477,6 +1491,7 @@ function cli.plan(agent, opts, p, gate)
     else
       local ok, d = pcall(gate.check, gate, {
         tool = schema[i].name, args = {}, ask = true, reason = schema[i].about,
+        always = schema[i].ask == "always" or nil,
       })
       plan.gate[i] = {
         tool      = schema[i].name,

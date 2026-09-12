@@ -533,6 +533,13 @@ local function resolve(gate, call)
     return decide(true, "memory", "allowed for the rest of this run")
   end
 
+  -- A question trust cannot waive (§2.3, amended 2026-09-12): a call marked `always`
+  -- goes from the memory straight to the port. A deny and a `never` have already had
+  -- their say above; an allow policy, trust and the flag do not get theirs.
+  if call.always then
+    return ask_port(gate, tool, args, call)
+  end
+
   -- 5. Allow policies.
   for i = 1, #policy do
     local e = policy[i]

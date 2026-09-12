@@ -220,4 +220,134 @@ Feature: planner
   assert(r.ok, say.report(r))
 end
 
+
+-- ------------------------------------------------------------------ what a rail must survive (2026-09-12)
+
+local root = here .. "/.."
+
+local function kit_files()
+  local out = {}
+  for _, dir in ipairs { "library", "showcase/kits" } do
+    local p = io.popen("ls '" .. root .. "/" .. dir .. "'")
+    for name in p:lines() do
+      if name:match("%.lua$") and name ~= "agent.def.lua" then out[#out + 1] = dir .. "/" .. name end
+    end
+    p:close()
+  end
+  table.sort(out)
+  return out
+end
+
+local function verify(path, read_fn)
+  local w = { outs = {}, errs = {} }
+  w.out = function (t) w.outs[#w.outs + 1] = t end
+  w.err = function (t) w.errs[#w.errs + 1] = t end
+  w.read = read_fn or read
+  w.env = function () return nil end
+  w.now = function () return 0 end
+  local code = cli.main({ "--verify", "--feature", path, path }, w)
+  return code, table.concat(w.outs) .. table.concat(w.errs)
+end
+
+function T.every_kit_that_carries_a_rail_names_the_scenarios_it_survives_and_they_verify()
+  local files = kit_files()
+  assert(#files >= 2, "the tree ships kits")
+  local railed = 0
+  for _, rel in ipairs(files) do
+    local text = assert(read(root .. "/" .. rel))
+    local chunk = assert((load or loadstring)(text, "=" .. rel))
+    local def = chunk()
+    assert(kits.define(def), rel .. " defines a kit")
+    if def.rails then
+      railed = railed + 1
+      assert(def.delegate == "fresh" or def.delegate == "inherit", rel .. " says what a delegate gets")
+      local kit_dir = (root .. "/" .. rel):match("^(.*)/[^/]*$")
+      for _, feature in ipairs(def.rails) do
+        local code, out = verify(kit_dir .. "/" .. feature)
+        assert(code == 0 and has(out, " 0 failed"), rel .. " rail " .. feature .. ":\n" .. out)
+      end
+    end
+  end
+  assert(railed >= 1, "the modes kit carries a rail and names its scenarios")
+end
+
+function T.a_kit_that_sets_a_hook_and_names_no_rails_is_refused_by_name()
+  local text = kit_text("  rails = nil,"):gsub("install = function %(told, agent%)",
+    'install = function (told, agent)\n    agent.on("call", function () return nil end)', 1)
+  local a, why = apply('Feature: t\n  Background:\n    Given the agent is called t\n    And its model is "test:model"\n'
+    .. '    And it uses the kit "hooked.lua"\n    And it keeps a hooked\n', { ["hooked.lua"] = (text:gsub("calendar", "hooked")) })
+  assert(a == nil and has(why, "sets a hook and names no `rails`"), tostring(why))
+  local bad = CALENDAR:gsub('name  = "calendar"', 'name  = "railed"'):gsub("\n%s*says = function", '\n  rails = { "x.feature" },\n  says = function', 1)
+  local chunk = assert((load or loadstring)(bad, "=railed"))
+  local ok, sentence = kits.define(chunk())
+  assert(ok == nil and has(sentence, "must say `delegate`"), tostring(sentence))
+end
+
+function T.the_embedded_copies_of_a_library_kit_match_the_library()
+  -- an eval that runs an author against a notebook carries the kit as a doc string; the
+  -- registry refuses a second text under one name, so a stale copy fails every nested
+  -- verify (found 2026-09-12 by evals/modes-rails.feature). scripts/embed-kits.lua rewrites them.
+  local p = io.popen("ls '" .. root .. "/evals'")
+  local checked = 0
+  for name in p:lines() do
+    if name:match("%.feature$") then
+      local text = assert(read(root .. "/evals/" .. name))
+      local pos = 1
+      while true do
+        local s, e, kit = text:find('    And the file "agents/([%w_%-]+%.lua)" contains:\n      """\n', pos)
+        if not s then break end
+        local lib = read(root .. "/library/" .. kit)
+        local close_s = text:find('\n      """\n', e + 1, true)
+        if lib and close_s then
+          local body = {}
+          for line in (lib:gsub("\n$", "") .. "\n"):gmatch("(.-)\n") do body[#body + 1] = line == "" and "" or ("      " .. line) end
+          assert(text:sub(e + 1, close_s - 1) == table.concat(body, "\n"),
+            "evals/" .. name .. " carries a stale copy of library/" .. kit .. "; run lua scripts/embed-kits.lua")
+          checked = checked + 1
+        end
+        pos = close_s or (e + 1)
+      end
+    end
+  end
+  p:close()
+  assert(checked >= 3, checked .. " embedded copies checked")
+end
+
+function T.the_first_draft_of_modes_fails_the_two_users_scenario_and_the_check_only_pair()
+  -- The proof the rails find what the real run found: the first draft kept the mode in
+  -- one variable for the whole kit. Swapped in for the real kit under its own name, it
+  -- fails evals/modes-rails.feature where the kit that ships passes it.
+  local v1 = assert(read(root .. "/test/fixtures/modes-v1.lua"))
+  local feature_path = root .. "/evals/modes-rails.feature"
+  local feature = assert(read(feature_path))
+  local body = {}
+  for line in (v1:gsub("\n$", "") .. "\n"):gmatch("(.-)\n") do body[#body + 1] = line == "" and "" or ("      " .. line) end
+  local s, e = feature:find('    And the file "agents/modes.lua" contains:\n      """\n', 1)
+  local close_s = feature:find('\n      """\n', e + 1, true)
+  local swapped = feature:sub(1, e) .. table.concat(body, "\n") .. feature:sub(close_s)
+  local function reading(p)
+    if p == feature_path then return swapped end
+    if p:match("library/modes%.lua$") then return v1 end
+    return read(p)
+  end
+  -- the registry is per process: take the real kit out by name, and put it back after
+  local kept, order = kits.registered.modes, kits.order
+  local without = {}
+  for _, n in ipairs(order) do if n ~= "modes" then without[#without + 1] = n end end
+  kits.registered.modes = nil
+  kits.order = without
+  kits.version = kits.version + 1
+  local ok, code, out = pcall(verify, feature_path, reading)
+  kits.registered.modes = kept
+  kits.order = order
+  kits.version = kits.version + 1
+  assert(ok, tostring(code))
+  assert(code ~= 0 and has(out, "two users of the kit in one process"), "the first draft fails the two-users scenario:\n" .. out)
+  assert(has(out, "3 failed") or has(out, "2 failed"), "and the check-only pair:\n" .. out)
+  -- and the tree's kit is back
+  local a = assert(apply('Feature: t\n  Background:\n    Given the agent is called t\n    And its model is "test:model"\n'
+    .. '    And it uses the kit "../library/modes.lua"\n    And it starts in the mode reading\n    And in the mode reading it may call "ping"\n'))
+  assert(a.tools.mode.always == true, "the real kit is registered again")
+end
+
 return T

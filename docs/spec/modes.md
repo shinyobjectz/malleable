@@ -78,10 +78,14 @@ loaded`, leaked it into the next scenario's run; `turn` now hands a hook the wor
 
 ## Why the person, and only the person
 
-A move is a gated call, so `--yes` approves it, `--no` refuses it, `its trust is trusted`
-skips the question and `its trust is none` puts every move to the person. That is the
-same lever the rest of the harness has, on purpose: a mode is not a second gate but a
-way of saying which tools exist before the gate is reached. There is no move on a fact
+A move is a gated call, so `--yes` approves it, `--no` refuses it and `its trust is
+none` puts every move to the person. The `mode` tool declares `ask = "always"`
+(`docs/spec/approval.md` §2.3, amended 2026-09-12): `its trust is trusted` and `it may
+always call mode` do not answer its question, because a mode that trust moves is a
+sentence, and a person who sets trust for convenience would lose the rail without being
+told. `it may never call mode` still pins the run in its start; a deny is the one thing
+nothing talks past. A mode is not a second gate but a way of saying which tools exist
+before the gate is reached. There is no move on a fact
 (after a verify passes, say): a hook cannot see a call's result, and a mode that moved
 itself would be a mode the model could move.
 
@@ -110,11 +114,18 @@ itself would be a mode the model could move.
 * The start line is a gate (`docs/spec/kit.md`): replacing `reading` with `editing` was a
   "neither" edit by the reach words and a widening in fact.
 * `the run begins in the mode` leaked across scenarios (above); fixed through `e.given`.
-* Under `its trust is trusted`, or `it may always call mode`, the model moves itself: the
-  mode is then a sentence. Under `it may never call mode` the run is pinned in its start.
-  A delegate does not inherit the parent's mode. All four are stated as features under
-  `evals/modes-*.feature` rather than hidden.
+* Under `its trust is trusted`, or `it may always call mode`, the model moved itself: the
+  mode was a sentence. Closed 2026-09-12 by `ask = "always"` on the `mode` tool;
+  `evals/modes-trusted.feature` and `modes-policy.feature` now state the rail. Under
+  `it may never call mode` the run is pinned in its start, which stands. A delegate does
+  not inherit the parent's mode, stated under `evals/modes-edges.feature`.
 * The mode was one variable for the whole kit, so a `verify` the author ran on the
   notebook, which uses the same kit, put the author back in reading (found by the
   real-model attack run: an approved move undone by the next verify). The state is now
-  per use, in the install's closure; a Then line reads the use whose run started last.
+  per use, in the install's closure.
+* A Then line then read the use whose run started last, which in a nested verify is the
+  notebook's, not the author's (found by `evals/modes-rails.feature` on the doubles,
+  2026-09-12, the first fault the doubles found before a model did). The kit keeps a stack
+  of the uses whose runs are open, pushed on `start` and popped on `stop`, and a Then line
+  reads the outermost. The kit names its rails (`docs/spec/kit.md`) and says a delegate
+  starts fresh.

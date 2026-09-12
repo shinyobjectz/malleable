@@ -145,6 +145,7 @@ states.
 | `the tool {word} is for {string}` | the `about` of a tool declared elsewhere: a kit's, or the Lua's |
 | `the tool {word} asks first` | `ask = true` |
 | `the tool {word} asks first, letting the person change {word}` | `ask = { edit = ... }` |
+| `the tool {word} always asks first` | `ask = "always"`: trust and an allow policy do not waive the question; a gate line (2026-09-12) |
 | `the tool {word} shows its call before it runs` | `preview = true` |
 | `the tool {word} requires {string}, checked by:` + doc string | a requirement; the doc string is its check |
 | `the tool {word} may be called at most {int} time(s)` | a call hook that refuses the call past it, counted per run |
@@ -309,8 +310,12 @@ tool to stop asking edits the file themselves. This is `spec/change.md`'s `ask` 
 exactly: an agent that can edit its own gate has no gate.
 
 **Widening goes to the person, not to a score.** A better rate is not a reason to reach
-further. `propose` is an ordinary tool with `ask = true`, so the harness's own gate is put
-the question before the body runs (rule 4), and a refusal is a result the agent reads.
+further. `propose` is an ordinary tool with `ask = "always"` (amended 2026-09-12: it was
+`ask = true`, and under `its trust is trusted` the gate answered its question itself, so
+every widening the person had refused was written; found by the trusted attack run and
+stated in `evals/wall-trusted.feature`), so the harness's own gate is put the question
+before the body runs (rule 4), trust and an allow policy do not answer it
+(`docs/spec/approval.md` §2.3), and a refusal is a result the agent reads.
 
 **The test is the person's.** An agent's scenarios are tagged `@proposed` and are not
 scored; a new file's scenarios are tagged on the way in. A person accepts one by removing the

@@ -296,4 +296,20 @@ function T.say_prints_the_rendering_and_conforms_exits_by_the_answer()
   assert(code == 2 and has(table.concat(w.errs), "gone.feature"), code .. table.concat(w.errs))
 end
 
+
+function T.a_tool_that_always_asks_is_said_so()
+  local a = assert(apply([[
+Feature: t
+  Background:
+    Given the agent is called t
+    And its model is "test:model"
+    And it has a tool ping for "Pong."
+    And the tool ping answers "pong"
+    And the tool ping always asks first
+]]))
+  local text = say.render(a)
+  assert(has(text, "And the tool ping always asks first"), text)
+  assert(not has(text, "And the tool ping asks first\n"), "said once: " .. text)
+end
+
 return T

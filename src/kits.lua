@@ -37,10 +37,14 @@ local function record(a, name, told, install)
   local hooks_before = hook_count()
   local out = install()
   told.hooks = hook_count() - hooks_before     -- a kit's hooks are said by the kit's line
+  -- a hook is a rail, and a rail ships with the scenarios it survives (docs/spec/kit.md)
+  if told.hooks > 0 and type(told.kit) == "table" and told.kit.rails == nil then
+    error("the kit " .. name .. " sets a hook and names no `rails`: the doubles scenarios its rail survives", 0)
+  end
   local tools, stores = {}, {}
   for i = 1, #a.order do
     local t = a.order[i]
-    if not before[t] then tools[t] = { about = a.tools[t].about, ask = a.tools[t].ask } end
+    if not before[t] then tools[t] = { about = a.tools[t].about, ask = a.tools[t].ask, always = a.tools[t].always } end
   end
   for i = 1, #(a.store_order or {}) do
     local st = a.store_order[i]
@@ -121,6 +125,22 @@ function kits.define(def)
   end
   if def.says ~= nil and type(def.says) ~= "function" then
     return nil, "the kit " .. name .. ": `says` is a function of what it was told"
+  end
+  -- A kit that carries a rail (a hook) names the doubles scenarios the rail survives and
+  -- says what a delegate under it gets (docs/spec/kit.md, "What a rail must survive").
+  if def.rails ~= nil then
+    if type(def.rails) ~= "table" or #def.rails == 0 then
+      return nil, "the kit " .. name .. ": `rails` is a list of feature paths, beside the kit file"
+    end
+    for i = 1, #def.rails do
+      if type(def.rails[i]) ~= "string" then return nil, "the kit " .. name .. ": rails entry " .. i .. " is not a path" end
+    end
+  end
+  if def.delegate ~= nil and def.delegate ~= "fresh" and def.delegate ~= "inherit" then
+    return nil, "the kit " .. name .. ": `delegate` is \"fresh\" or \"inherit\": what a delegate under it starts with"
+  end
+  if def.rails ~= nil and def.delegate == nil then
+    return nil, "the kit " .. name .. " names rails and must say `delegate`: what a delegate under it starts with"
   end
   return true
 end

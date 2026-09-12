@@ -541,7 +541,9 @@ function authoring.install(a, s, opts)
     about = "Make one edit that widens what an agent can reach -- a tool, a body, commands, a delegate, a "
       .. "server, a beat, the model -- or create a new agent (op create, the whole file as `text`, what "
       .. "it is in its Background). The person is asked first.",
-    ask = true,
+    -- a widening is the person's to approve whatever the trust: under `trusted` the gate
+    -- answered for them (evals/wall-trusted.feature, 2026-09-12; spec/declare.md)
+    ask = "always",
     args = EDIT_ARGS(s),
     run = function (c) return apply(folder, locked, c, true) end,
   }

@@ -318,6 +318,12 @@ with the real model from `OPENROUTER_API_KEY` and a scratch root with no history
 the console's agents are measured by live in `evals/`, the talker's in `scripts/eval-talk.lua`,
 and the findings in `docs/eval-report.md`.
 
+**Every fault a real run finds becomes a doubles scenario first, and the fix second**
+(ruled 2026-09-12, `docs/confidence-plan.md`). A real-model run is where a fault is
+noticed; the doubles are where it is kept from coming back, and a fix that lands without
+the scenario that fails before it is a fix nobody can tell from luck. The scenario goes
+in the eval file the run came from, or in a kit's `rails` (`docs/spec/kit.md`).
+
 ### The long task: a real shell, a real folder, hours
 
 `scripts/eval-long.lua FEATURE --only NAME [--root DIR] [--hours H] [--journal FILE] [--out FILE]`
@@ -413,6 +419,18 @@ answer says` and drops the tag.
 Per scenario: samples, passes, the rate, and every failing sample kept whole — its result
 and its trace (`spec/trace.md`), which is what makes a failure diagnosable instead of
 merely counted. Per feature: the rates, and the scenarios that could not be evaluated.
+
+Beside every rate, its 95% Wilson interval (`behaviour.interval(passes, samples)`, kept on
+the scenario as `interval`; added 2026-09-12, `docs/confidence-plan.md` item 1): `3/3`
+prints as `3/3 (0.44-1.00)` and `9/10` as `9/10 (0.60-0.98)`, so a reader sees what three
+samples cannot say. Two rates are different only when their intervals do not overlap.
+`scripts/eval.lua` takes `--seed N`, written into its report and its `--out` file as the
+run's label (the model port sends no seed today: OpenRouter's answer for one is not a
+promise, and the label is what lets two runs a week apart be told apart), and
+`scripts/eval-all.lua` runs every eval file that names a real model at one sample count,
+in parallel batches of `scripts/eval.lua` processes, and merges the reports into one dated
+file under `docs/evals/`, with the date, the models, the seed, the intervals per scenario
+and per model, and every failure's reason.
 
 A rate is reported as a fraction of the samples that ran and never rounded up to a
 sentence. There is no threshold in this tree, no pass mark and no grade: what rate is good

@@ -133,7 +133,7 @@ function T.the_wall_scores_the_mode_lines_as_the_kit_said()
 end
 
 function T.the_edge_features_verify_on_the_doubles()
-  for _, name in ipairs { "modes-edges", "modes-trusted", "modes-policy", "modes-pinned" } do
+  for _, name in ipairs { "modes-edges", "modes-trusted", "modes-policy", "modes-pinned", "modes-rails" } do
     local w = { outs = {}, errs = {} }
     w.out = function (t) w.outs[#w.outs + 1] = t end
     w.err = function (t) w.errs[#w.errs + 1] = t end
@@ -144,6 +144,36 @@ function T.the_edge_features_verify_on_the_doubles()
     local code = cli.main({ "--verify", "--feature", f, f }, w)
     local out = table.concat(w.outs) .. table.concat(w.errs)
     assert(code == 0 and has(out, " 0 failed"), name .. ":\n" .. out)
+  end
+end
+
+
+function T.the_mode_tool_asks_whatever_the_trust()
+  -- The hole the 2026-09-12 attack run recorded: under `its trust is trusted` the model
+  -- moved itself. Now the kit's tool declares ask = "always" and the header says so.
+  local a = assert(apply(HEAD .. [[
+    And its trust is trusted
+    And it starts in the mode reading
+    And in the mode reading it may call "ping"
+]]))
+  assert(a.tools.mode.ask == true and a.tools.mode.always == true, "the mode tool always asks")
+  local said = say.render(a)
+  assert(not has(said, "always asks first"), "the kit's line says it, not a line of the file:\n" .. said)
+  local o = assert(cli.parse({ "--dry-run", "x.feature" }))
+  local w = { outs = {}, errs = {} }
+  w.out = function (t) w.outs[#w.outs + 1] = t end
+  w.err = w.out
+  w.read = function () return nil, "missing" end
+  w.env = function () return nil end
+  w.now = function () return 0 end
+  local p, gate, warnings = cli.wire(o, w, a)
+  assert(p, tostring(gate))
+  local seen = false
+  for _, s in ipairs(warnings or {}) do if has(s, "trust: the tool mode always asks first") then seen = true end end
+  assert(seen, "the header warns that trust does not answer the mode tool: " .. table.concat(warnings or {}, " | "))
+  local plan = cli.plan(a, o, p, gate)
+  for i = 1, #plan.gate do
+    if plan.gate[i].tool == "mode" then assert(plan.gate[i].asks == true and plan.gate[i].consulted == true, "the plan asks about mode") end
   end
 end
 

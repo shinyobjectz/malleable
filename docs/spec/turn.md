@@ -246,7 +246,10 @@ the dialect note says both interpreters must agree.
 
 Dispatching one call means: look the tool up; check the arguments against the declared
 parameters; if the tool sets `ask = true`, ask the gate and honour the decision; then
-call the body inside `pcall` with a context. Order matters — arguments are validated
+call the body inside `pcall` with a context. A tool that sets `ask = "always"` asks too,
+and the gate's question carries `always = true`, which is how the approval gate knows
+that neither trust nor an allow policy may answer it (`docs/spec/approval.md` §2.3,
+amended 2026-09-12); on the declaration the tool has `ask = true` and `always = true`. Order matters — arguments are validated
 before the person is asked, so nobody is asked to approve a call that was never going to
 run.
 

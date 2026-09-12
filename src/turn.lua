@@ -836,6 +836,7 @@ function turn.run(agent, prompt, port, opts)
         agent = agent.name, tool = name, about = tool.about,
         args = copy(args), step = step, call = call_id,
         edit = tool.edit and copy(tool.edit) or nil, choices = choices,
+        always = tool.always or nil,
       })
       local decision, why, complaint
       if not asked then

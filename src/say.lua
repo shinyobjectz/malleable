@@ -125,7 +125,8 @@ local function lines_of(a)
       -- a kit's tool is said by the kit's line; only what the file changed about it is a line
       local was = kit.tools[name]
       if t.about ~= was.about then line("the tool " .. name .. " is for " .. q(t.about)) end
-      if t.ask and not was.ask then line("the tool " .. name .. " asks first") end
+      if t.always and not was.always then line("the tool " .. name .. " always asks first")
+      elseif t.ask and not was.ask then line("the tool " .. name .. " asks first") end
     elseif kits.delegates and kits.delegates[name] then
       line("it hands work to the agent in " .. q(kits.delegates[name].path) .. " as " .. name)
     elseif t.agents then
@@ -141,7 +142,9 @@ local function lines_of(a)
         line("it has a tool " .. name .. " for " .. q(t.about) .. ", which takes:", nil, nil,
              rows_of({ "argument", "type", "about" }, rows))
       end
-      if t.ask then
+      if t.always then
+        line("the tool " .. name .. " always asks first")
+      elseif t.ask then
         if t.edit and #t.edit > 0 then
           for _, arg in ipairs(t.edit) do
             line("the tool " .. name .. " asks first, letting the person change " .. arg)

@@ -298,8 +298,17 @@ local IS = {
   { expr = "the tool {word} asks first", covers = "tool", about = "the person is asked before it runs", reach = "narrows", gate = true,
     apply = function (p, s, tool)
       local m = mod(p, tool, s.line)
-      if m.ask then refuse(s.line, "the tool %s already asks first, at line %d", tool, m.ask) end
-      m.ask = s.line
+      -- `always asks first` says it asks too; the two lines are order-free (spec/declare.md)
+      if m.ask and m.ask ~= m.always then refuse(s.line, "the tool %s already asks first, at line %d", tool, m.ask) end
+      m.ask = m.ask or s.line
+    end },
+  { expr = "the tool {word} always asks first", covers = "tool",
+    about = "the person is asked whatever the trust and whatever a policy allows", reach = "narrows", gate = true,
+    apply = function (p, s, tool)
+      local m = mod(p, tool, s.line)
+      if m.always then refuse(s.line, "the tool %s already always asks first, at line %d", tool, m.always) end
+      m.always = s.line
+      m.ask = m.ask or s.line
     end },
   { expr = "the tool {word} asks first, letting the person change {word}", covers = "tool",
     about = "and the person may change that argument at the gate", reach = "narrows", gate = true,
@@ -888,7 +897,8 @@ local function build(plan, a, opts, title)
         refuse(m.about.line, "the tool %s says what it is for where it is declared, at line %d", name, t.line)
       end
       local ask = m and m.ask and true or nil
-      if m and m.edit then ask = { edit = m.edit } end
+      if m and m.always then ask = "always" end
+      if m and m.edit then ask = { edit = m.edit, always = m and m.always and true or nil } end
       local run, said = body_of(name, m, t.line)
       guarded(t.line, s.tool(name), {
         about = t.about, args = t.args, ask = ask, preview = m and m.preview or nil,
@@ -935,6 +945,7 @@ local function build(plan, a, opts, title)
       end
       if m.body then refuse(m.body.line, "the tool %s has its body already, from where it was declared", name) end
       if m.ask then tool.ask = true end
+      if m.always then tool.ask = true; tool.always = true end
       if m.about then tool.about = m.about.text end
       if m.edit then
         for _, arg in ipairs(m.edit) do
