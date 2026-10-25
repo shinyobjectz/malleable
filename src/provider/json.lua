@@ -53,10 +53,17 @@ local function escape_char(c)
   return string.format("\\u%04x", string.byte(c))
 end
 
+-- Luerl's %c also matches bytes 0x80-0x9F (the C1 range), which are UTF-8
+-- continuation bytes; only ASCII controls are escaped, so UTF-8 is never split.
+local function escape_ascii(c)
+  if string.byte(c) >= 128 then return c end
+  return escape_char(c)
+end
+
 local function quote(s)
   -- Control characters and the two structural characters only. Everything else,
   -- including UTF-8, travels as itself.
-  return '"' .. s:gsub('[%c"\\]', escape_char) .. '"'
+  return '"' .. s:gsub('[%c"\\]', escape_ascii) .. '"'
 end
 
 local function number_text(v)
@@ -258,8 +265,15 @@ local function read_string(s, i)
       -- a long completion quadratic.
       local stop = s:find('["\\%c]', at)
       if not stop then return nil, nil, "a string was not closed" end
-      out[#out + 1] = s:sub(at, stop - 1)
-      at = stop
+      if stop == at then
+        -- A byte %c matched that is not an ASCII control: under Luerl that is a
+        -- UTF-8 continuation byte. Take it and move on, or the loop never advances.
+        out[#out + 1] = c
+        at = at + 1
+      else
+        out[#out + 1] = s:sub(at, stop - 1)
+        at = stop
+      end
     end
   end
 end
